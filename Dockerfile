@@ -27,7 +27,8 @@ RUN pip install --upgrade pip && \
         "django-ratelimit>=4.1.0,<5.0.0" \
         "drf-spectacular>=0.28.0,<0.29.0" \
         "python-telegram-bot>=22.3,<23.0" \
-        "django-redis>=5.4.0,<6.0.0"
+        "django-redis>=5.4.0,<6.0.0" \
+        "gunicorn>=22.0.0,<23.0.0"
 
 # Дефолтная команда (в docker-compose переопределяется)
 CMD ["python", "manage.py", "runserver", "0.0.0.0:8000"]
