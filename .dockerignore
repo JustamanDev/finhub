@@ -1,0 +1,16 @@
+.git
+__pycache__/
+*.py[cod]
+*.log
+.venv/
+venv/
+logs/
+finhub_debug.log
+*.sqlite3
+*.tmp
+*.bak
+node_modules/
+static/
+media/
+
+

@@ -1,0 +1,65 @@
+services:
+  redis:
+    image: redis:7
+    restart: unless-stopped
+    ports:
+      - "6379:6379"
+  db:
+    image: postgres:16
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${DB_NAME}
+      POSTGRES_USER: ${DB_USER}
+      POSTGRES_PASSWORD: ${DB_PASSWORD}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    ports:
+      - "5432:5432"
+
+  web:
+    build: .
+    command: >
+      sh -c "
+      python manage.py migrate --noinput &&
+      python manage.py runserver 0.0.0.0:8000
+      "
+    env_file:
+      - .env
+    environment:
+      DJANGO_ENVIRONMENT: development
+      DB_HOST: db
+      STATIC_ROOT: /app/static/
+      MEDIA_ROOT: /app/media/
+      REDIS_URL: redis://redis:6379/1
+    volumes:
+      - .:/app
+      - static_data:/app/static
+      - media_data:/app/media
+    ports:
+      - "8000:8000"
+    depends_on:
+      - db
+      - redis
+    restart: unless-stopped
+
+  bot:
+    build: .
+    command: >
+      sh -c "python manage.py run_bot"
+    env_file:
+      - .env
+    environment:
+      DJANGO_ENVIRONMENT: development
+      DB_HOST: db
+      REDIS_URL: redis://redis:6379/1
+    depends_on:
+      - db
+      - redis
+    restart: unless-stopped
+
+volumes:
+  postgres_data:
+  static_data:
+  media_data:
+
+
