@@ -460,9 +460,10 @@ class TextHandler(BaseHandler):
             
             # Отправляем подтверждение
             type_name = "доходов" if normalized_type == "income" else "расходов"
+            display_name = category.name
             message = (
                 f"✅ **Категория создана!**\n\n"
-                f"**{category.icon} {category.name}**\n"
+                f"**{display_name}**\n"
                 f"Тип: {type_name}\n\n"
                 f"Теперь вы можете добавлять {type_name} в эту категорию."
             )
@@ -910,9 +911,11 @@ class TextHandler(BaseHandler):
 
     def _parse_category_name_and_icon(self, text: str) -> tuple[str, str]:
         """
-        Разбирает ввод пользователя для категории:
-        - name: полная строка как есть
-        - icon: первое встреченное эмодзи или дефолт
+        Разбирает ввод пользователя для категории.
+
+        Поведение:
+        - name: полная строка как ввёл пользователь (с эмодзи в любом месте);
+        - icon: первое встреченное эмодзи или дефолтная папка.
         """
         raw_text = text.strip()
 
@@ -978,7 +981,7 @@ class TextHandler(BaseHandler):
 
         message = (
             "✅ **Категория переименована!**\n\n"
-            f"Теперь: {icon} {name}"
+            f"Теперь: {name}"
         )
         await context.bot.send_message(
             chat_id=update.effective_chat.id,

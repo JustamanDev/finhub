@@ -383,6 +383,47 @@ class SettingsHandler(BaseHandler):
             keyboard,
         )
     
+    async def handle_category_icon_change(
+        self,
+        update: Update | CallbackQuery,
+        context: ContextTypes.DEFAULT_TYPE,
+        telegram_user,
+        category_id: int,
+        icon: str,
+    ) -> None:
+        """Сохраняет новую иконку для категории"""
+        user = await sync_to_async(lambda: telegram_user.user)()
+        category_service = CategoryManagementService(user)
+        category = await category_service.get_category_by_id(category_id)
+
+        if not category:
+            await self._send_error_message(update, context, "Категория не найдена")
+            return
+
+        category.icon = icon
+        await category_service.save_category(category)
+
+        message = (
+            "✅ **Иконка обновлена!**\n\n"
+            f"Теперь: {category.icon} {category.name}"
+        )
+
+        keyboard = [
+            [
+                InlineKeyboardButton(
+                    text="🔙 Назад к категории",
+                    callback_data=f"category_edit_{category_id}",
+                ),
+            ],
+        ]
+
+        await self._send_or_edit_message(
+            update,
+            context,
+            message,
+            keyboard,
+        )
+    
     async def handle_general_settings(
         self,
         update: Update | CallbackQuery,

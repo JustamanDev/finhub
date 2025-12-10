@@ -194,6 +194,9 @@ class CallbackHandler(BaseHandler):
             elif query.data.startswith("category_icon_"):
                 logger.info("Вызываем _handle_category_icon")
                 await self._handle_category_icon(query, context, telegram_user)
+            elif query.data.startswith("category_icon_select_"):
+                logger.info("Вызываем _handle_category_icon_select")
+                await self._handle_category_icon_select(query, context, telegram_user)
             elif query.data.startswith("category_type_select_"):
                 logger.info("Вызываем _handle_category_type_select")
                 await self._handle_category_type_select(query, context, telegram_user)
@@ -971,6 +974,38 @@ class CallbackHandler(BaseHandler):
             )
         else:
             await query.answer("Ошибка: неверный ID категории")
+    
+    async def _handle_category_icon_select(
+        self,
+        query: CallbackQuery,
+        context: ContextTypes.DEFAULT_TYPE,
+        telegram_user,
+    ) -> None:
+        """Обрабатывает выбор новой иконки из сетки"""
+        from telegram_bot.handlers.settings_handler import SettingsHandler
+
+        # Формат: category_icon_select_{category_id}_{icon}
+        parts = query.data.split("_", 4)
+        if len(parts) < 5:
+            await query.answer("Ошибка: неверные данные иконки")
+            return
+
+        try:
+            category_id = int(parts[3])
+        except ValueError:
+            await query.answer("Ошибка: неверный ID категории")
+            return
+
+        icon = parts[4]
+
+        settings_handler = SettingsHandler()
+        await settings_handler.handle_category_icon_change(
+            query,
+            context,
+            telegram_user,
+            category_id,
+            icon,
+        )
     
     async def _handle_category_rename(
         self,
