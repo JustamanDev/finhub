@@ -6,7 +6,11 @@ Production настройки для FinHub проекта.
 from .base import *
 
 # SECURITY WARNING: don't run with debug turned on in production!
-DEBUG = config('DEBUG', default=False, cast=bool)
+DEBUG = config(
+    'DEBUG', 
+    default=False, 
+    cast=bool,
+    )
 
 ALLOWED_HOSTS = config('ALLOWED_HOSTS', default='').split(',')
 
@@ -168,11 +172,13 @@ MEDIA_URL = '/media/'
 # Performance settings for production
 USE_TZ = True
 
-# Database connection pooling for production
+# Database connection pooling and optional SSL for production
+DB_SSLMODE = config('DB_SSLMODE', default='disable')
+
 DATABASES['default'].update({
     'CONN_MAX_AGE': 600,  # 10 minutes
     'OPTIONS': {
-        'sslmode': 'require',
+        'sslmode': DB_SSLMODE,
     },
 })
 
