@@ -38,11 +38,8 @@ class CategoryKeyboard:
             InlineKeyboardMarkup с кнопками категорий
         """
         categories = await self._get_user_categories(transaction_type)
-        
-        # Пагинация
-        start_idx = page * self.MAX_CATEGORIES_PER_PAGE
-        end_idx = start_idx + self.MAX_CATEGORIES_PER_PAGE
-        page_categories = categories[start_idx:end_idx]
+        # Временно отключаем пагинацию и показываем все категории
+        page_categories = categories
         
         # Создаем кнопки категорий
         buttons = []
@@ -55,15 +52,6 @@ class CategoryKeyboard:
                 )
                 row.append(button)
             buttons.append(row)
-        
-        # Кнопки навигации
-        navigation_buttons = await self._get_navigation_buttons(
-            transaction_type,
-            page,
-            len(categories),
-        )
-        if navigation_buttons:
-            buttons.extend(navigation_buttons)
         
         # Кнопка переключения типа транзакции
         switch_button = await self._get_switch_button(transaction_type)
@@ -83,45 +71,14 @@ class CategoryKeyboard:
         transaction_type: str,
     ) -> InlineKeyboardMarkup:
         """
-        Создает клавиатуру с часто используемыми категориями
-        
-        Args:
-            transaction_type: 'expense' или 'income'
-            
-        Returns:
-            InlineKeyboardMarkup с кнопками категорий
+        Ранее здесь показывались «часто используемые» категории и кнопка
+        «Все категории». Сейчас по UX‑требованию всегда показываем
+        полный список категорий без пагинации.
         """
-        # TODO: Добавить логику подсчета частоты использования
-        categories = await self._get_user_categories(transaction_type)
-        categories = categories[:5]  # Берем первые 5 категорий
-        
-        buttons = []
-        for category in categories:
-            button = InlineKeyboardButton(
-                text=f"{category.icon} {category.name}",
-                callback_data=f"category_{category.id}",
-            )
-            buttons.append([button])
-        
-        # Кнопка "Все категории"
-        all_categories_button = InlineKeyboardButton(
-            text="📋 Все категории",
-            callback_data=f"all_categories_{transaction_type}",
+        return await self.get_categories_keyboard(
+            transaction_type=transaction_type,
+            page=0,
         )
-        buttons.append([all_categories_button])
-        
-        # Кнопка переключения типа
-        switch_button = await self._get_switch_button(transaction_type)
-        buttons.append([switch_button])
-        
-        # Кнопка "Главное меню"
-        main_menu_button = InlineKeyboardButton(
-            text="🏠 Главное меню",
-            callback_data="main_menu",
-        )
-        buttons.append([main_menu_button])
-        
-        return InlineKeyboardMarkup(buttons)
     
     async def _get_user_categories(self, transaction_type: str) -> List[Category]:
         """
