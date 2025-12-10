@@ -38,6 +38,20 @@ class TextHandler(BaseHandler):
             telegram_user = await self.get_or_create_telegram_user(
                 update.effective_user
             )
+
+            # --- Переименование категории ---
+            # Если установлен флаг renaming_category_id, любое сообщение
+            # трактуем как новое имя категории.
+            renaming_category_id = context.user_data.get("renaming_category_id")
+            if renaming_category_id:
+                await self._handle_category_rename_input(
+                    update,
+                    context,
+                    telegram_user,
+                    renaming_category_id,
+                    update.message.text,
+                )
+                return
             
             # --- Обработка состояний редактирования (дата/комментарий) ---
             # Сначала проверим, не находится ли пользователь в режиме редактирования даты транзакции
@@ -395,43 +409,21 @@ class TextHandler(BaseHandler):
         logger.info(f"Начинаем создание категории: {text}")
         
         try:
-            # Парсим текст категории: сохраняем ввод пользователя как есть,
-            # а иконку определяем как первое эмодзи в строке (если есть).
-            raw_text = text.strip()
-            parts = raw_text.split()
-            logger.info(f"Разобранные части: {parts}")
-            
-            if not raw_text:
+            if not text.strip():
                 await self._send_error_message(
                     update,
                     context,
                     "Неверный формат. Используйте: `название [иконка]`\n"
                     "**Примеры:**\n"
-                    "• `Зарплата 💰`\n"
-                    "• `💰 Зарплата`\n"
-                    "• `Кредит карта ⚓`"
+                    "• `🥕 Продукты`\n"
+                    "• `Продукты 🥕`\n"
+                    "• `Продукты`"
                 )
                 return
-
-            def is_emoji(ch: str) -> bool:
-                """Грубая проверка, является ли символ эмодзи."""
-                return (
-                    "\U0001F300" <= ch <= "\U0001FAFF"  # основные emoji
-                    or "\u2600" <= ch <= "\u26FF"       # символы типа ⚓, ☕ и т.п.
-                    or "\u2700" <= ch <= "\u27BF"       # символы типа ✈, ✍ и т.п.
-                )
-
-            # По умолчанию используем папку, если эмодзи не найдено
-            icon = "📁"
-            for ch in raw_text:
-                if is_emoji(ch):
-                    icon = ch
-                    break
-
-            # Название категории сохраняем полностью, как ввёл пользователь
-            name = raw_text
             
-            logger.info(f"Парсинг категории: name={name!r}, icon={icon!r}")
+            # Разбираем имя и иконку (эмодзи может быть в начале/конце/внутри)
+            name, icon = self._parse_category_name_and_icon(text)
+            logger.info(f"Парсинг категории (создание): name={name!r}, icon={icon!r}")
             
             # Получаем тип категории из состояния
             user_state = await self.get_user_state(telegram_user)
@@ -915,6 +907,83 @@ class TextHandler(BaseHandler):
                 message,
                 keyboard,
             ) 
+
+    def _parse_category_name_and_icon(self, text: str) -> tuple[str, str]:
+        """
+        Разбирает ввод пользователя для категории:
+        - name: полная строка как есть
+        - icon: первое встреченное эмодзи или дефолт
+        """
+        raw_text = text.strip()
+
+        def is_emoji(ch: str) -> bool:
+            return (
+                "\U0001F300" <= ch <= "\U0001FAFF"
+                or "\u2600" <= ch <= "\u26FF"
+                or "\u2700" <= ch <= "\u27BF"
+            )
+
+        icon = "📁"
+        for ch in raw_text:
+            if is_emoji(ch):
+                icon = ch
+                break
+
+        name = raw_text
+        return name, icon
+
+    async def _handle_category_rename_input(
+        self,
+        update: Update,
+        context: ContextTypes.DEFAULT_TYPE,
+        telegram_user,
+        category_id: int,
+        text: str,
+    ) -> None:
+        """Обрабатывает ввод нового названия категории"""
+        from telegram_bot.services.category_management_service import CategoryManagementService
+
+        logger.info(f"Переименование категории {category_id}: {text!r}")
+
+        if not text.strip():
+            await self._send_error_message(
+                update,
+                context,
+                "Название категории не может быть пустым.",
+            )
+            return
+
+        name, icon = self._parse_category_name_and_icon(text)
+        user = await sync_to_async(lambda: telegram_user.user)()
+        category_service = CategoryManagementService(user)
+
+        category = await category_service.get_category_by_id(category_id)
+        if not category:
+            await self._send_error_message(
+                update,
+                context,
+                "Категория не найдена.",
+            )
+            context.user_data.pop("renaming_category_id", None)
+            return
+
+        # Обновляем категорию
+        await category_service.update_category(
+            category_id=category_id,
+            name=name,
+            icon=icon,
+        )
+
+        context.user_data.pop("renaming_category_id", None)
+
+        message = (
+            "✅ **Категория переименована!**\n\n"
+            f"Теперь: {icon} {name}"
+        )
+        await context.bot.send_message(
+            chat_id=update.effective_chat.id,
+            text=message,
+        ) 
     
     async def _send_or_edit_message(
         self,
