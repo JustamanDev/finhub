@@ -188,6 +188,9 @@ class CallbackHandler(BaseHandler):
             elif query.data.startswith("category_actions_"):
                 logger.info("Вызываем _handle_category_actions")
                 await self._handle_category_actions(query, context, telegram_user)
+            elif query.data.startswith("category_rename_"):
+                logger.info("Вызываем _handle_category_rename")
+                await self._handle_category_rename(query, context, telegram_user)
             elif query.data.startswith("category_icon_"):
                 logger.info("Вызываем _handle_category_icon")
                 await self._handle_category_icon(query, context, telegram_user)
@@ -968,6 +971,34 @@ class CallbackHandler(BaseHandler):
             )
         else:
             await query.answer("Ошибка: неверный ID категории")
+    
+    async def _handle_category_rename(
+        self,
+        query: CallbackQuery,
+        context: ContextTypes.DEFAULT_TYPE,
+        telegram_user,
+    ) -> None:
+        """Обрабатывает нажатие 'Переименовать'"""
+        from telegram_bot.handlers.settings_handler import SettingsHandler
+
+        parts = query.data.split('_')
+        if len(parts) < 3:
+            await query.answer("Ошибка: неверный ID категории")
+            return
+
+        try:
+            category_id = int(parts[2])
+        except ValueError:
+            await query.answer("Ошибка: неверный ID категории")
+            return
+
+        settings_handler = SettingsHandler()
+        await settings_handler.handle_category_rename_prompt(
+            query,
+            context,
+            telegram_user,
+            category_id,
+        )
     
     async def _handle_category_type(
         self,

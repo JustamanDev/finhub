@@ -262,13 +262,12 @@ class SettingsHandler(BaseHandler):
         
         message = (
             f"{type_icon} **Создание категории {type_name}**\n\n"
-            "Отправьте название новой категории:\n"
-            "`<название> [иконка]`\n\n"
+            "Отправьте название новой категории **в любой форме** "
+            "(можно с эмодзи):\n\n"
             "**Примеры:**\n"
-            f"• `Зарплата 💰`\n"
-            f"• `Продукты 🥕`\n"
-            f"• `Развлечения 🎉`\n\n"
-            "**Иконка:** любой эмодзи (необязательно)"
+            "• `🥕 Продукты`\n"
+            "• `Продукты 🥕`\n"
+            "• `Продукты`"
         )
         
         # Устанавливаем состояние ожидания создания категории
@@ -1036,7 +1035,53 @@ class SettingsHandler(BaseHandler):
                 context,
                 f"Ошибка при выполнении действия: {str(e)}"
             )
-    
+
+    async def handle_category_rename_prompt(
+        self,
+        update: Update | CallbackQuery,
+        context: ContextTypes.DEFAULT_TYPE,
+        telegram_user,
+        category_id: int,
+    ) -> None:
+        """Показывает форму переименования категории и ставит флаг"""
+        user = await sync_to_async(lambda: telegram_user.user)()
+        category_service = CategoryManagementService(user)
+        category = await category_service.get_category_by_id(category_id)
+
+        if not category:
+            await self._send_error_message(update, context, "Категория не найдена")
+            return
+
+        # Сохраняем ID категории в user_data для TextHandler
+        context.user_data["renaming_category_id"] = category_id
+
+        message = (
+            "✏️ **Переименование категории**\n\n"
+            f"Текущая категория: {category.icon} {category.name}\n\n"
+            "Отправьте новое название категории **в любой форме** "
+            "(можно с эмодзи):\n\n"
+            "Примеры:\n"
+            "• `🥕 Продукты`\n"
+            "• `Продукты 🥕`\n"
+            "• `Продукты`"
+        )
+
+        keyboard = [
+            [
+                InlineKeyboardButton(
+                    text="🔙 Назад",
+                    callback_data=f"category_actions_{category_id}",
+                ),
+            ],
+        ]
+
+        await self._send_or_edit_message(
+            update,
+            context,
+            message,
+            keyboard,
+        )
+
     async def _send_or_edit_message(
         self,
         update: Update | CallbackQuery,
