@@ -381,7 +381,7 @@ class SettingsHandler(BaseHandler):
             context,
             message,
             keyboard,
-        )
+            )
     
     async def handle_category_icon_change(
         self,
@@ -394,14 +394,16 @@ class SettingsHandler(BaseHandler):
         """Сохраняет новую иконку для категории"""
         user = await sync_to_async(lambda: telegram_user.user)()
         category_service = CategoryManagementService(user)
-        category = await category_service.get_category_by_id(category_id)
+        
+        # Используем метод update_category вместо прямого изменения
+        category = await category_service.update_category(
+            category_id=category_id,
+            icon=icon,
+        )
 
         if not category:
             await self._send_error_message(update, context, "Категория не найдена")
             return
-
-        category.icon = icon
-        await category_service.save_category(category)
 
         message = (
             "✅ **Иконка обновлена!**\n\n"
