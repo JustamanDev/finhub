@@ -128,6 +128,115 @@ docker compose \
   down
 ```
 
+### 4.1. Типовой сценарий: деплой нового кода (после `git pull`)
+
+**Сценарий:** ты поменял код в Git (или смержил pull request) и хочешь, чтобы на проде поехала новая версия.
+
+1. **Подключиться к серверу по SSH**
+
+   ```bash
+   ssh your-user@your-server
+   ```
+
+2. **Обновить код проекта из Git**
+
+   ```bash
+   cd /srv/www/finhub
+   git pull origin main      # или другая нужная ветка
+   ```
+
+3. **Пересобрать образ и перезапустить только `web` и `bot`**
+
+   ```bash
+   cd /srv/compose
+
+   docker compose \
+     --env-file /srv/www/finhub/.env \
+     -f finhub.yml \
+     up -d --build web bot
+   ```
+
+   - `--build` гарантирует, что образ будет пересобран с новым кодом.
+   - `web` и `bot` перезапускаются, **БД и Redis не трогаем**.
+
+4. **Проверить статус контейнеров**
+
+   ```bash
+   docker compose \
+     --env-file /srv/www/finhub/.env \
+     -f finhub.yml \
+     ps
+   ```
+
+5. **(Опционально) посмотреть логи, если что‑то пошло не так**
+
+   ```bash
+   docker compose \
+     --env-file /srv/www/finhub/.env \
+     -f finhub.yml \
+     logs web --since=2m
+
+   docker compose \
+     --env-file /srv/www/finhub/.env \
+     -f finhub.yml \
+     logs bot --since=2m
+   ```
+
+### 4.2. Если изменился только `.env` (настройки, токены и т.п.)
+
+**Сценарий:** ты поправил `/srv/www/finhub/.env`, но код не менял.
+
+1. Убедиться, что `.env` сохранён.
+2. Перезапустить нужные сервисы **без пересборки образа**:
+
+   - Если поменялись только переменные для Django/бота:
+
+     ```bash
+     cd /srv/compose
+
+     docker compose \
+       --env-file /srv/www/finhub/.env \
+       -f finhub.yml \
+       restart web bot
+     ```
+
+   - Если поменялись переменные БД (пароль и т.п.):
+
+     ```bash
+     cd /srv/compose
+
+     docker compose \
+       --env-file /srv/www/finhub/.env \
+       -f finhub.yml \
+       restart db web bot
+     ```
+
+### 4.3. Полная перезагрузка всего стека
+
+**Сценарий:** нужно “перезапустить всё” (редко, но бывает).
+
+1. Остановить стек:
+
+   ```bash
+   cd /srv/compose
+
+   docker compose \
+     --env-file /srv/www/finhub/.env \
+     -f finhub.yml \
+     down
+   ```
+
+2. Запустить заново (с пересборкой образов):
+
+   ```bash
+   docker compose \
+     --env-file /srv/www/finhub/.env \
+     -f finhub.yml \
+     up -d --build
+   ```
+
+3. Проверить статус и логи (как в разделах 4.1 и 5).
+
 ---
 
 ## 5. Типичные проверки после деплоя
@@ -190,5 +299,56 @@ docker compose \
   - При подключении к внешнему Postgres включаем `DB_SSLMODE=require` только в `.env`.
 - Любые изменения в настройках сначала вносим в git‑репозиторий (код/compose/гайды),
   затем деплоим и обновляем `Summary.md`.
+
+## 7. Как убедиться, что не запущены старые контейнеры
+
+**Цель:** чтобы работал только новый стек (`compose-*`), а старые контейнеры (`finhub-*`) не мешали.
+
+1. **Посмотреть все контейнеры, связанные с проектом**
+
+   ```bash
+   docker ps --format 'table {{.Names}}\t{{.Status}}' | grep -E 'finhub|compose' || true
+   ```
+
+2. **Убедиться, что активны только контейнеры вида `compose-web-1`, `compose-bot-1`, `compose-db-1`, `compose-redis-1`.**
+
+   - Если видишь контейнеры вида `finhub-web-1`, `finhub-bot-1` и т.п. — это старый стек.
+
+3. **Остановить старые контейнеры и отключить автозапуск**
+
+   Пример (названия подставить по факту вывода `docker ps`):
+
+   ```bash
+   # остановить старые контейнеры
+   docker stop finhub-web-1 finhub-bot-1 finhub-db-1 finhub-redis-1 2>/dev/null || true
+
+   # запретить им автоматически стартовать
+   docker update --restart=no finhub-web-1 finhub-bot-1 finhub-db-1 finhub-redis-1 2>/dev/null || true
+   ```
+
+4. **Если старый стек запускался через отдельный compose‑файл**
+
+   Если ты знаешь путь к старому `docker-compose.yml` / `finhub-old.yml`:
+
+   ```bash
+   cd /path/to/old/compose
+
+   docker compose down
+   ```
+
+5. **Проверить, нет ли systemd‑юнитов для старого стека**
+
+   ```bash
+   systemctl list-units | grep -i finhub || true
+   ```
+
+   Если найдутся старые сервисы, их можно выключить:
+
+   ```bash
+   sudo systemctl disable --now finhub-bot.service    # пример имени
+   sudo systemctl disable --now finhub-web.service
+   ```
+
+После этого при перезагрузке сервера должен автоматически подниматься только стек, который ты управляешь через `/srv/compose/finhub.yml`.
 
 
