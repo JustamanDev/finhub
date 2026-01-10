@@ -38,6 +38,7 @@ LOCAL_APPS = [
     'categories',
     'transactions',
     'budgets',
+    'goals',
     'telegram_bot',
 ]
 
