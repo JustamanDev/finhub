@@ -47,83 +47,141 @@ class TextHandler(BaseHandler):
         text = update.message.text.strip()
 
         from telegram_bot.keyboards.goals import GoalsKeyboard
+        from decimal import InvalidOperation
+        from django.db import IntegrityError
 
-        try:
-            if step == 'title':
-                if len(text) < 2:
-                    raise ValueError("Название слишком короткое")
-                data['title'] = text
-                context.user_data['goal_creation_data'] = data
-                context.user_data['goal_creation_step'] = 'amount'
-
+        if step == 'title':
+            if len(text) < 2:
                 await update.message.reply_text(
-                    "💰 Введите целевую сумму (например: 100000 или 250000.50):",
+                    "❌ Название слишком короткое.\n\n"
+                    "Пример: **iPad**, **Машина**, **Отпуск**",
                     reply_markup=GoalsKeyboard.get_goal_input_keyboard(cancel_callback="goals_menu"),
                     parse_mode='Markdown',
                 )
                 return
 
-            if step == 'amount':
+            data['title'] = text
+            context.user_data['goal_creation_data'] = data
+            context.user_data['goal_creation_step'] = 'amount'
+
+            await update.message.reply_text(
+                "💰 Введите целевую сумму (например: 100000 или 250000.50):",
+                reply_markup=GoalsKeyboard.get_goal_input_keyboard(cancel_callback="goals_menu"),
+                parse_mode='Markdown',
+            )
+            return
+
+        if step == 'amount':
+            try:
                 amount = self._parse_money(text)
-                if amount <= 0:
-                    raise ValueError("Сумма должна быть больше нуля")
-                data['target_amount'] = str(amount)
-                context.user_data['goal_creation_data'] = data
-                context.user_data['goal_creation_step'] = 'deadline'
-
+            except (InvalidOperation, ValueError):
                 await update.message.reply_text(
-                    "📅 Введите дедлайн (ДД.MM.YYYY) или напишите **«без срока»**:",
+                    "❌ Неверный формат суммы.\n\nПримеры: **100000**, **250000.50**",
                     reply_markup=GoalsKeyboard.get_goal_input_keyboard(cancel_callback="goals_menu"),
                     parse_mode='Markdown',
                 )
                 return
 
-            if step == 'deadline':
-                deadline = None
-                if not self._is_no_deadline(text):
+            if amount <= 0:
+                await update.message.reply_text(
+                    "❌ Сумма должна быть больше нуля.\n\nПример: **100000**",
+                    reply_markup=GoalsKeyboard.get_goal_input_keyboard(cancel_callback="goals_menu"),
+                    parse_mode='Markdown',
+                )
+                return
+
+            data['target_amount'] = str(amount)
+            context.user_data['goal_creation_data'] = data
+            context.user_data['goal_creation_step'] = 'deadline'
+
+            await update.message.reply_text(
+                "📅 Введите дедлайн (ДД.MM.YYYY) или напишите **«без срока»**:",
+                reply_markup=GoalsKeyboard.get_goal_input_keyboard(cancel_callback="goals_menu"),
+                parse_mode='Markdown',
+            )
+            return
+
+        if step == 'deadline':
+            deadline = None
+            if not self._is_no_deadline(text):
+                try:
+                    deadline = _dt.strptime(text, '%d.%m.%Y').date()
+                except ValueError:
                     try:
-                        deadline = _dt.strptime(text, '%d.%m.%Y').date()
-                    except ValueError:
                         deadline = _dt.strptime(text, '%Y-%m-%d').date()
+                    except ValueError:
+                        await update.message.reply_text(
+                            "❌ Неверный формат даты.\n\n"
+                            "Примеры: **01.09.2026** или **2026-09-01** или **без срока**",
+                            reply_markup=GoalsKeyboard.get_goal_input_keyboard(cancel_callback="goals_menu"),
+                            parse_mode='Markdown',
+                        )
+                        return
 
-                title = data.get('title')
+            title = data.get('title')
+            try:
                 target_amount = Decimal(data.get('target_amount', '0'))
-                if not title or target_amount <= 0:
-                    raise ValueError("Некорректные данные цели, начните заново")
+            except (InvalidOperation, ValueError):
+                target_amount = Decimal('0')
 
-                user = await sync_to_async(lambda: telegram_user.user)()
-                service = GoalService(user)
+            if not title or target_amount <= 0:
+                # сбрасываем state, чтобы пользователь не застрял в некорректном сценарии
+                context.user_data.pop('goal_creation_step', None)
+                context.user_data.pop('goal_creation_data', None)
+                await update.message.reply_text(
+                    "❌ Данные цели потерялись. Начните создание заново.",
+                    reply_markup=GoalsKeyboard.get_goal_input_keyboard(cancel_callback="goals_menu"),
+                    parse_mode='Markdown',
+                )
+                return
+
+            user = await sync_to_async(lambda: telegram_user.user)()
+            service = GoalService(user)
+            try:
                 goal = await service.create_goal(
                     title=title,
                     target_amount=target_amount,
                     deadline=deadline,
                 )
-
-                # очищаем state
-                context.user_data.pop('goal_creation_step', None)
-                context.user_data.pop('goal_creation_data', None)
-
-                from telegram_bot.handlers.goals_handler import GoalsHandler
-
-                await update.message.reply_text("✅ Цель создана. Вот её карточка:")
-                handler = GoalsHandler()
-                await handler.handle_goal_view(update, context, telegram_user, goal.id)
+            except IntegrityError:
+                # цель с таким названием уже есть
+                context.user_data['goal_creation_step'] = 'title'
+                context.user_data['goal_creation_data'] = {}
+                await update.message.reply_text(
+                    "❌ Цель с таким названием уже существует.\n\nВведите другое название:",
+                    reply_markup=GoalsKeyboard.get_goal_input_keyboard(cancel_callback="goals_menu"),
+                    parse_mode='Markdown',
+                )
                 return
 
-            # неизвестный шаг -> сбрасываем
+            # очищаем state ДО попытки показать карточку (чтобы не застрять)
             context.user_data.pop('goal_creation_step', None)
             context.user_data.pop('goal_creation_data', None)
-            await update.message.reply_text("❌ Состояние создания цели сброшено. Попробуйте снова.")
-        except Exception:
-            await update.message.reply_text(
-                "❌ Не получилось распознать ввод.\n\n"
-                "Примеры:\n"
-                "- название: «iPad»\n"
-                "- сумма: 100000\n"
-                "- дедлайн: 01.09.2026 или «без срока»",
-                reply_markup=GoalsKeyboard.get_goal_input_keyboard(cancel_callback="goals_menu"),
-                parse_mode='Markdown',
-            )
+
+            from telegram_bot.handlers.goals_handler import GoalsHandler
+
+            handler = GoalsHandler()
+            try:
+                await update.message.reply_text("✅ Цель создана. Вот её карточка:")
+                await handler.handle_goal_view(update, context, telegram_user, goal.id)
+            except Exception:
+                # Цель создана, но UI мог упасть (Markdown/Telegram ошибки и т.п.).
+                # Не маскируем это как "не получилось распознать ввод".
+                await update.message.reply_text(
+                    "✅ Цель создана, но не удалось показать карточку.\n"
+                    "Откройте: **🎯 Цели → 📋 Мои цели**.",
+                    parse_mode='Markdown',
+                )
+            return
+
+        # неизвестный шаг -> сбрасываем
+        context.user_data.pop('goal_creation_step', None)
+        context.user_data.pop('goal_creation_data', None)
+        await update.message.reply_text(
+            "❌ Состояние создания цели сброшено. Попробуйте снова.",
+            reply_markup=GoalsKeyboard.get_goal_input_keyboard(cancel_callback="goals_menu"),
+            parse_mode='Markdown',
+        )
 
     async def _handle_goal_deposit_input(
         self,
