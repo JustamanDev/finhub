@@ -150,6 +150,12 @@ class ActionKeyboard:
                     callback_data="show_budgets",
                 ),
                 InlineKeyboardButton(
+                    text="🎯 Цели",
+                    callback_data="goals_menu",
+                ),
+            ],
+            [
+                InlineKeyboardButton(
                     text="⚙️ Настройки",
                     callback_data="settings",
                 ),

@@ -81,6 +81,67 @@ class CallbackHandler(BaseHandler):
                     context,
                     telegram_user,
                 )
+            elif query.data == 'goals_menu':
+                await self._handle_goals_menu(
+                    query,
+                    context,
+                    telegram_user,
+                )
+            elif query.data == 'goals_list':
+                await self._handle_goals_list(
+                    query,
+                    context,
+                    telegram_user,
+                )
+            elif query.data == 'goal_create':
+                await self._handle_goal_create_prompt(
+                    query,
+                    context,
+                    telegram_user,
+                )
+            elif query.data.startswith('goal_view_'):
+                goal_id = int(query.data.split('_')[2])
+                await self._handle_goal_view(
+                    query,
+                    context,
+                    telegram_user,
+                    goal_id,
+                )
+            elif query.data.startswith('goal_history_'):
+                goal_id = int(query.data.split('_')[2])
+                await self._handle_goal_history(
+                    query,
+                    context,
+                    telegram_user,
+                    goal_id,
+                )
+            elif query.data.startswith('goal_deposit_'):
+                goal_id = int(query.data.split('_')[2])
+                await self._handle_goal_deposit_prompt(
+                    query,
+                    context,
+                    telegram_user,
+                    goal_id,
+                )
+            elif query.data.startswith('goal_withdraw_'):
+                goal_id = int(query.data.split('_')[2])
+                await self._handle_goal_withdraw_prompt(
+                    query,
+                    context,
+                    telegram_user,
+                    goal_id,
+                )
+            elif query.data.startswith('goal_quick_deposit_'):
+                parts = query.data.split('_')
+                goal_id = int(parts[3])
+                amount = int(parts[4])
+                await self._handle_goal_quick_deposit(
+                    query,
+                    context,
+                    telegram_user,
+                    goal_id,
+                    amount,
+                )
             elif query.data in ('switch_to_income', 'switch_to_expense'):
                 # Переключение типа транзакции (расход/доход)
                 await self._handle_type_switch(
@@ -139,7 +200,11 @@ class CallbackHandler(BaseHandler):
             elif query.data == 'settings':
                 logger.info("Вызываем _handle_settings")
                 await self._handle_settings(query, context, telegram_user)
-            elif query.data.startswith('edit_date_') or query.data.startswith('edit_comment_'):
+            elif (
+                query.data.startswith('edit_amount_')
+                or query.data.startswith('edit_date_')
+                or query.data.startswith('edit_comment_')
+            ):
                 # Редактирование транзакции (дата/комментарий)
                 await self._handle_transaction_edit(
                     query,
@@ -1168,6 +1233,10 @@ class CallbackHandler(BaseHandler):
             'editing_budget_id',
             'limit_creation',
             'renaming_category_id',
+            'goal_creation_step',
+            'goal_creation_data',
+            'goal_deposit_goal_id',
+            'goal_withdraw_goal_id',
         ):
             context.user_data.pop(key, None)
 
@@ -1176,6 +1245,162 @@ class CallbackHandler(BaseHandler):
             text="🏠 Главное меню FinHub\n\nВыберите действие:",
             reply_markup=keyboard,
         )
+
+    async def _handle_goals_menu(
+        self,
+        query: CallbackQuery,
+        context: ContextTypes.DEFAULT_TYPE,
+        telegram_user,
+    ) -> None:
+        from telegram_bot.handlers.goals_handler import GoalsHandler
+
+        for key in (
+            'goal_creation_step',
+            'goal_creation_data',
+            'goal_deposit_goal_id',
+            'goal_withdraw_goal_id',
+        ):
+            context.user_data.pop(key, None)
+
+        handler = GoalsHandler()
+        await handler.handle_goals_menu(query, context, telegram_user)
+
+    async def _handle_goals_list(
+        self,
+        query: CallbackQuery,
+        context: ContextTypes.DEFAULT_TYPE,
+        telegram_user,
+    ) -> None:
+        from telegram_bot.handlers.goals_handler import GoalsHandler
+
+        for key in (
+            'goal_creation_step',
+            'goal_creation_data',
+            'goal_deposit_goal_id',
+            'goal_withdraw_goal_id',
+        ):
+            context.user_data.pop(key, None)
+
+        handler = GoalsHandler()
+        await handler.handle_goals_list(query, context, telegram_user)
+
+    async def _handle_goal_view(
+        self,
+        query: CallbackQuery,
+        context: ContextTypes.DEFAULT_TYPE,
+        telegram_user,
+        goal_id: int,
+    ) -> None:
+        from telegram_bot.handlers.goals_handler import GoalsHandler
+
+        for key in (
+            'goal_creation_step',
+            'goal_creation_data',
+            'goal_deposit_goal_id',
+            'goal_withdraw_goal_id',
+        ):
+            context.user_data.pop(key, None)
+
+        handler = GoalsHandler()
+        await handler.handle_goal_view(query, context, telegram_user, goal_id)
+
+    async def _handle_goal_history(
+        self,
+        query: CallbackQuery,
+        context: ContextTypes.DEFAULT_TYPE,
+        telegram_user,
+        goal_id: int,
+    ) -> None:
+        from telegram_bot.handlers.goals_handler import GoalsHandler
+
+        for key in (
+            'goal_creation_step',
+            'goal_creation_data',
+            'goal_deposit_goal_id',
+            'goal_withdraw_goal_id',
+        ):
+            context.user_data.pop(key, None)
+
+        handler = GoalsHandler()
+        await handler.handle_goal_history(query, context, telegram_user, goal_id)
+
+    async def _handle_goal_create_prompt(
+        self,
+        query: CallbackQuery,
+        context: ContextTypes.DEFAULT_TYPE,
+        telegram_user,
+    ) -> None:
+        from telegram_bot.keyboards.goals import GoalsKeyboard
+
+        # Сбрасываем, если ранее уже был начат flow
+        context.user_data.pop('goal_creation_data', None)
+        context.user_data['goal_creation_step'] = 'title'
+        context.user_data['goal_creation_data'] = {}
+
+        keyboard = GoalsKeyboard.get_goal_input_keyboard(cancel_callback="goals_menu")
+        await query.edit_message_text(
+            "➕ **Создать цель**\n\nВведите название цели (например: iPad / Машина / Отпуск):",
+            reply_markup=keyboard,
+            parse_mode='Markdown',
+        )
+
+    async def _handle_goal_deposit_prompt(
+        self,
+        query: CallbackQuery,
+        context: ContextTypes.DEFAULT_TYPE,
+        telegram_user,
+        goal_id: int,
+    ) -> None:
+        from telegram_bot.keyboards.goals import GoalsKeyboard
+
+        context.user_data['goal_deposit_goal_id'] = goal_id
+        keyboard = GoalsKeyboard.get_goal_input_keyboard(cancel_callback=f"goal_view_{goal_id}")
+        await query.edit_message_text(
+            "➕ **Внести в цель**\n\nВведите сумму (например: 5000 или 499.90):",
+            reply_markup=keyboard,
+            parse_mode='Markdown',
+        )
+
+    async def _handle_goal_withdraw_prompt(
+        self,
+        query: CallbackQuery,
+        context: ContextTypes.DEFAULT_TYPE,
+        telegram_user,
+        goal_id: int,
+    ) -> None:
+        from telegram_bot.keyboards.goals import GoalsKeyboard
+
+        context.user_data['goal_withdraw_goal_id'] = goal_id
+        keyboard = GoalsKeyboard.get_goal_input_keyboard(cancel_callback=f"goal_view_{goal_id}")
+        await query.edit_message_text(
+            "↩️ **Снять из цели**\n\nВведите сумму, которую хотите снять:",
+            reply_markup=keyboard,
+            parse_mode='Markdown',
+        )
+
+    async def _handle_goal_quick_deposit(
+        self,
+        query: CallbackQuery,
+        context: ContextTypes.DEFAULT_TYPE,
+        telegram_user,
+        goal_id: int,
+        amount: int,
+    ) -> None:
+        from decimal import Decimal
+        from asgiref.sync import sync_to_async
+        from telegram_bot.handlers.goals_handler import GoalsHandler
+        from telegram_bot.services.goal_service import GoalService
+
+        user = await sync_to_async(lambda: telegram_user.user)()
+        service = GoalService(user)
+        entry = await service.add_deposit(goal_id, Decimal(amount))
+        if not entry:
+            await query.answer("Цель не найдена")
+            return
+
+        await query.answer("✅ Переведено")
+        handler = GoalsHandler()
+        await handler.handle_goal_view(query, context, telegram_user, goal_id)
     
     async def _handle_show_report(
         self,

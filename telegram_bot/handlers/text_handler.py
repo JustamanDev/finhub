@@ -9,6 +9,7 @@ from telegram_bot.keyboards.categories import CategoryKeyboard
 from telegram_bot.keyboards.actions import ActionKeyboard
 from telegram_bot.services.transaction_service import TransactionService
 from telegram_bot.services.category_management_service import CategoryManagementService
+from telegram_bot.services.goal_service import GoalService
 from budgets.models import Budget
 from categories.models import Category
 from datetime import datetime as _dt
@@ -18,6 +19,165 @@ logger = logging.getLogger(__name__)
 
 class TextHandler(BaseHandler):
     """Обработчик текстовых сообщений"""
+
+    @staticmethod
+    def _parse_money(text: str) -> Decimal:
+        cleaned = text.strip().replace(' ', '').replace(',', '.')
+        return Decimal(cleaned)
+
+    @staticmethod
+    def _is_no_deadline(text: str) -> bool:
+        t = text.strip().lower()
+        return t in (
+            'без срока',
+            'без дедлайна',
+            'нет',
+            '-',
+            '0',
+        )
+
+    async def _handle_goal_creation_input(
+        self,
+        update: Update,
+        context: ContextTypes.DEFAULT_TYPE,
+        telegram_user,
+    ) -> None:
+        step = context.user_data.get('goal_creation_step')
+        data = context.user_data.get('goal_creation_data', {})
+        text = update.message.text.strip()
+
+        from telegram_bot.keyboards.goals import GoalsKeyboard
+
+        try:
+            if step == 'title':
+                if len(text) < 2:
+                    raise ValueError("Название слишком короткое")
+                data['title'] = text
+                context.user_data['goal_creation_data'] = data
+                context.user_data['goal_creation_step'] = 'amount'
+
+                await update.message.reply_text(
+                    "💰 Введите целевую сумму (например: 100000 или 250000.50):",
+                    reply_markup=GoalsKeyboard.get_goal_input_keyboard(cancel_callback="goals_menu"),
+                    parse_mode='Markdown',
+                )
+                return
+
+            if step == 'amount':
+                amount = self._parse_money(text)
+                if amount <= 0:
+                    raise ValueError("Сумма должна быть больше нуля")
+                data['target_amount'] = str(amount)
+                context.user_data['goal_creation_data'] = data
+                context.user_data['goal_creation_step'] = 'deadline'
+
+                await update.message.reply_text(
+                    "📅 Введите дедлайн (ДД.MM.YYYY) или напишите **«без срока»**:",
+                    reply_markup=GoalsKeyboard.get_goal_input_keyboard(cancel_callback="goals_menu"),
+                    parse_mode='Markdown',
+                )
+                return
+
+            if step == 'deadline':
+                deadline = None
+                if not self._is_no_deadline(text):
+                    try:
+                        deadline = _dt.strptime(text, '%d.%m.%Y').date()
+                    except ValueError:
+                        deadline = _dt.strptime(text, '%Y-%m-%d').date()
+
+                title = data.get('title')
+                target_amount = Decimal(data.get('target_amount', '0'))
+                if not title or target_amount <= 0:
+                    raise ValueError("Некорректные данные цели, начните заново")
+
+                user = await sync_to_async(lambda: telegram_user.user)()
+                service = GoalService(user)
+                goal = await service.create_goal(
+                    title=title,
+                    target_amount=target_amount,
+                    deadline=deadline,
+                )
+
+                # очищаем state
+                context.user_data.pop('goal_creation_step', None)
+                context.user_data.pop('goal_creation_data', None)
+
+                from telegram_bot.handlers.goals_handler import GoalsHandler
+
+                await update.message.reply_text("✅ Цель создана. Вот её карточка:")
+                handler = GoalsHandler()
+                await handler.handle_goal_view(update, context, telegram_user, goal.id)
+                return
+
+            # неизвестный шаг -> сбрасываем
+            context.user_data.pop('goal_creation_step', None)
+            context.user_data.pop('goal_creation_data', None)
+            await update.message.reply_text("❌ Состояние создания цели сброшено. Попробуйте снова.")
+        except Exception:
+            await update.message.reply_text(
+                "❌ Не получилось распознать ввод.\n\n"
+                "Примеры:\n"
+                "- название: «iPad»\n"
+                "- сумма: 100000\n"
+                "- дедлайн: 01.09.2026 или «без срока»",
+                reply_markup=GoalsKeyboard.get_goal_input_keyboard(cancel_callback="goals_menu"),
+                parse_mode='Markdown',
+            )
+
+    async def _handle_goal_deposit_input(
+        self,
+        update: Update,
+        context: ContextTypes.DEFAULT_TYPE,
+        telegram_user,
+        goal_id: int,
+    ) -> None:
+        from telegram_bot.handlers.goals_handler import GoalsHandler
+
+        try:
+            amount = self._parse_money(update.message.text)
+            if amount <= 0:
+                raise ValueError("amount<=0")
+            user = await sync_to_async(lambda: telegram_user.user)()
+            service = GoalService(user)
+            entry = await service.add_deposit(goal_id, amount)
+            if not entry:
+                await update.message.reply_text("❌ Цель не найдена.")
+                return
+            await update.message.reply_text(f"✅ Внесено {amount:,.0f} ₽")
+            handler = GoalsHandler()
+            await handler.handle_goal_view(update, context, telegram_user, goal_id)
+        except Exception:
+            await update.message.reply_text("❌ Неверная сумма. Пример: 5000 или 499.90")
+        finally:
+            context.user_data.pop('goal_deposit_goal_id', None)
+
+    async def _handle_goal_withdraw_input(
+        self,
+        update: Update,
+        context: ContextTypes.DEFAULT_TYPE,
+        telegram_user,
+        goal_id: int,
+    ) -> None:
+        from telegram_bot.handlers.goals_handler import GoalsHandler
+
+        try:
+            amount = self._parse_money(update.message.text)
+            if amount <= 0:
+                raise ValueError("amount<=0")
+            user = await sync_to_async(lambda: telegram_user.user)()
+            service = GoalService(user)
+            entry = await service.add_withdraw(goal_id, amount)
+            if not entry:
+                await update.message.reply_text("❌ Цель не найдена.")
+                return
+            await update.message.reply_text(f"✅ Снято {amount:,.0f} ₽")
+            handler = GoalsHandler()
+            await handler.handle_goal_view(update, context, telegram_user, goal_id)
+        except Exception:
+            await update.message.reply_text("❌ Неверная сумма. Пример: 5000 или 499.90")
+        finally:
+            context.user_data.pop('goal_withdraw_goal_id', None)
     
     async def handle_text_message(
         self,
@@ -52,6 +212,22 @@ class TextHandler(BaseHandler):
                     renaming_category_id,
                     update.message.text,
                 )
+                return
+
+            # --- Цели: создание / пополнение / снятие ---
+            goal_creation_step = context.user_data.get('goal_creation_step')
+            if goal_creation_step:
+                await self._handle_goal_creation_input(update, context, telegram_user)
+                return
+
+            if context.user_data.get('goal_deposit_goal_id'):
+                goal_id = context.user_data.get('goal_deposit_goal_id')
+                await self._handle_goal_deposit_input(update, context, telegram_user, goal_id)
+                return
+
+            if context.user_data.get('goal_withdraw_goal_id'):
+                goal_id = context.user_data.get('goal_withdraw_goal_id')
+                await self._handle_goal_withdraw_input(update, context, telegram_user, goal_id)
                 return
             
             # --- Обработка состояний редактирования (дата/комментарий) ---
