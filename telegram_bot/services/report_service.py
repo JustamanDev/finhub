@@ -130,7 +130,6 @@ class ReportService:
             else:
                 # Для расходов: проверяем есть ли бюджет
                 budget_info = await sync_to_async(category.get_budget_info)()
-                print(f"DEBUG: Category {category.name}, budget_info: {budget_info}")  # Отладка
                 if budget_info:
                     # Есть бюджет: баланс = остаток от бюджета
                     balance = budget_info['remaining_amount']

@@ -1,12 +1,15 @@
 import logging
 from datetime import datetime
+import io
 from telegram import Update, CallbackQuery
 from telegram.ext import ContextTypes
 from asgiref.sync import sync_to_async
+from telegram.constants import ChatAction
 
 from .base import BaseHandler
 from telegram_bot.keyboards.reports import ReportKeyboard
 from telegram_bot.services.report_service import ReportService
+from telegram_bot.services.report_export_service import ReportExportService
 
 logger = logging.getLogger(__name__)
 
@@ -86,6 +89,58 @@ class ReportHandler(BaseHandler):
             year,
             month,
         )
+
+    async def handle_export_excel_month(
+        self,
+        update: Update | CallbackQuery,
+        context: ContextTypes.DEFAULT_TYPE,
+        telegram_user,
+        year: int,
+        month: int,
+    ) -> None:
+        """
+        Генерирует и отправляет Excel-файл за указанный месяц.
+
+        UX:
+        - не редактируем текущее сообщение с отчетом
+        - отправляем файл отдельным сообщением, чтобы отчет оставался на экране
+        """
+        try:
+            user = await sync_to_async(lambda: telegram_user.user)()
+            export_service = ReportExportService(user)
+
+            chat_id = None
+            # CallbackQuery (чаще всего экспорт вызывается именно так)
+            if hasattr(update, "answer"):
+                await update.answer("Готовлю Excel…")
+                if getattr(update, "message", None):
+                    chat_id = update.message.chat_id
+
+            # Обычное сообщение/Update
+            if chat_id is None and hasattr(update, "effective_chat") and update.effective_chat:
+                chat_id = update.effective_chat.id
+
+            if chat_id is None:
+                raise RuntimeError("Не удалось определить chat_id для отправки Excel")
+
+            await context.bot.send_chat_action(chat_id=chat_id, action=ChatAction.UPLOAD_DOCUMENT)
+            result = await export_service.build_monthly_excel(year, month)
+
+            buf = io.BytesIO(result.content)
+            buf.name = result.filename
+
+            await context.bot.send_document(
+                chat_id=chat_id,
+                document=buf,
+                caption=f"📥 Excel-отчет за {month:02d}.{year}",
+            )
+        except Exception:
+            logger.exception("Ошибка экспорта Excel")
+            # Пытаемся показать ошибку пользователю максимально мягко
+            if hasattr(update, "message") and getattr(update, "message", None):
+                await update.message.reply_text("❌ Не удалось сформировать Excel. Попробуйте позже.")
+            elif hasattr(update, "edit_message_text"):
+                await update.edit_message_text("❌ Не удалось сформировать Excel. Попробуйте позже.")
     
     async def _show_monthly_report(
         self,

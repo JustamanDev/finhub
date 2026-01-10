@@ -69,13 +69,29 @@ class ReportKeyboard:
         
         keyboard.append(nav_buttons)
         
+        # Действия для текущего периода
+        keyboard.append(
+            [
+                InlineKeyboardButton(
+                    text="📥 Excel",
+                    callback_data=f"report_export_excel_{current_period['year']}_{current_period['month']}",
+                ),
+                InlineKeyboardButton(
+                    text="📋 К отчетам",
+                    callback_data="show_report",
+                ),
+            ]
+        )
+
         # Кнопка "Главное меню"
-        keyboard.append([
-            InlineKeyboardButton(
-                text="🏠 Главное меню",
-                callback_data="main_menu"
-            )
-        ])
+        keyboard.append(
+            [
+                InlineKeyboardButton(
+                    text="🏠 Главное меню",
+                    callback_data="main_menu",
+                )
+            ]
+        )
         
         return InlineKeyboardMarkup(keyboard)
     
@@ -87,6 +103,12 @@ class ReportKeyboard:
                 InlineKeyboardButton(
                     text="📊 Текущий месяц",
                     callback_data="report_current"
+                )
+            ],
+            [
+                InlineKeyboardButton(
+                    text="📥 Excel (текущий месяц)",
+                    callback_data="report_export_excel_current",
                 )
             ],
             [
