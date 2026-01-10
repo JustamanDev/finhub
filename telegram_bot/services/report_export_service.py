@@ -103,6 +103,7 @@ class ReportExportService:
             }
         )
         fmt_h2 = workbook.add_format({"bold": True, "font_size": 12})
+        fmt_note = workbook.add_format({"font_color": "#666666", "text_wrap": True})
         fmt_header = workbook.add_format(
             {
                 "bold": True,
@@ -110,8 +111,19 @@ class ReportExportService:
                 "border": 1,
             }
         )
+        fmt_header_strong = workbook.add_format(
+            {
+                "bold": True,
+                "bg_color": "#E8E8E8",
+                "border": 1,
+            }
+        )
         fmt_money = workbook.add_format({"num_format": "#,##0.00"})
         fmt_money_red = workbook.add_format({"num_format": "#,##0.00", "font_color": "#C00000"})
+        fmt_money_bold = workbook.add_format({"num_format": "#,##0.00", "bold": True})
+        fmt_money_bold_red = workbook.add_format(
+            {"num_format": "#,##0.00", "bold": True, "font_color": "#C00000"}
+        )
         fmt_date = workbook.add_format({"num_format": "dd.mm.yyyy"})
 
         # ---- агрегаты ----
@@ -151,16 +163,20 @@ class ReportExportService:
         total_expenses = sum(category_expense.values(), Decimal("0"))
         net = total_income - total_expenses
 
-        # ---- sheet: Summary ----
-        ws_summary = workbook.add_worksheet("Summary")
+        # ---- sheet: Сводка ----
+        ws_summary = workbook.add_worksheet("Сводка")
         ws_summary.set_column("A:A", 22)
-        ws_summary.set_column("B:B", 22)
+        ws_summary.set_column("B:B", 52)
         ws_summary.set_column("C:C", 22)
-        ws_summary.set_column("D:D", 22)
+        ws_summary.set_column("D:D", 40)
 
         ws_summary.write(0, 0, report_title, fmt_title)
         ws_summary.write(1, 0, "Период", fmt_h2)
-        ws_summary.write(1, 1, f"{start_date.strftime('%d.%m.%Y')} – {(end_date).strftime('%d.%m.%Y')} (не включая)")
+        ws_summary.write(
+            1,
+            1,
+            f"{start_date.strftime('%d.%m.%Y')} – {(end_date).strftime('%d.%m.%Y')} (не включая)",
+        )
         ws_summary.write(2, 0, "Сформировано", fmt_h2)
         ws_summary.write(2, 1, datetime.now().strftime("%d.%m.%Y %H:%M"))
 
@@ -168,21 +184,31 @@ class ReportExportService:
         ws_summary.write_number(4, 1, float(total_income), fmt_money)
         ws_summary.write(5, 0, "Расходы", fmt_h2)
         ws_summary.write_number(5, 1, float(total_expenses), fmt_money)
-        ws_summary.write(6, 0, "Чистый cashflow", fmt_h2)
+        ws_summary.write(6, 0, "Чистый денежный поток", fmt_h2)
         ws_summary.write_number(6, 1, float(net), fmt_money if net >= 0 else fmt_money_red)
 
-        # ---- sheet: Cashflow (daily) ----
-        ws_cf = workbook.add_worksheet("Cashflow")
+        ws_summary.write(8, 0, "Как читать этот отчет", fmt_h2)
+        ws_summary.write(
+            9,
+            0,
+            "• Сальдо дня = Доходы − Расходы за конкретный день.\n"
+            "• Накопленное сальдо = сумма «Сальдо дня» с начала месяца (стартуем с 0).\n"
+            "  Это НЕ «баланс банковского счета», а динамика результата за месяц.\n"
+            "  Если линия растет — месяц в плюсе; если падает — расходы обгоняют доходы.",
+            fmt_note,
+        )
+
+        # ---- sheet: Кэшфлоу (daily) ----
+        ws_cf = workbook.add_worksheet("Кэшфлоу")
         ws_cf.freeze_panes(1, 0)
         ws_cf.set_column("A:A", 14)
-        ws_cf.set_column("B:D", 16)
-        ws_cf.set_column("E:E", 18)
+        ws_cf.set_column("B:E", 20)
 
         ws_cf.write(0, 0, "Дата", fmt_header)
         ws_cf.write(0, 1, "Доходы", fmt_header)
         ws_cf.write(0, 2, "Расходы", fmt_header)
-        ws_cf.write(0, 3, "Net", fmt_header)
-        ws_cf.write(0, 4, "Кумулятивный баланс", fmt_header)
+        ws_cf.write(0, 3, "Сальдо дня", fmt_header)
+        ws_cf.write(0, 4, "Накопленное сальдо", fmt_header)
 
         # полный диапазон дней месяца
         day = start_date
@@ -207,30 +233,48 @@ class ReportExportService:
         chart_balance = workbook.add_chart({"type": "line"})
         chart_balance.add_series(
             {
-                "name": "Кумулятивный баланс",
-                "categories": ["Cashflow", 1, 0, r - 1, 0],
-                "values": ["Cashflow", 1, 4, r - 1, 4],
+                "name": "Накопленное сальдо",
+                "categories": ["Кэшфлоу", 1, 0, r - 1, 0],
+                "values": ["Кэшфлоу", 1, 4, r - 1, 4],
             }
         )
-        chart_balance.set_title({"name": "Cashflow: кумулятивный баланс"})
+        chart_balance.set_title({"name": "Динамика cashflow за месяц"})
         chart_balance.set_y_axis({"name": "₽"})
         ws_summary.insert_chart("D4", chart_balance, {"x_scale": 1.2, "y_scale": 1.2})
 
-        # ---- sheet: Categories ----
-        ws_cat = workbook.add_worksheet("Categories")
+        # ---- sheet: Категории ----
+        ws_cat = workbook.add_worksheet("Категории")
         ws_cat.freeze_panes(1, 0)
         ws_cat.set_column("A:A", 36)
         ws_cat.set_column("B:C", 18)
+        ws_cat.set_column("D:D", 18)
 
         ws_cat.write(0, 0, "Категория", fmt_header)
         ws_cat.write(0, 1, "Доходы", fmt_header)
         ws_cat.write(0, 2, "Расходы", fmt_header)
+        ws_cat.write(0, 3, "Сальдо", fmt_header)
 
         cat_names = sorted(set(category_income.keys()) | set(category_expense.keys()))
         for idx, name in enumerate(cat_names, start=1):
             ws_cat.write(idx, 0, name)
-            ws_cat.write_number(idx, 1, float(category_income.get(name, Decimal("0"))), fmt_money)
-            ws_cat.write_number(idx, 2, float(category_expense.get(name, Decimal("0"))), fmt_money)
+            inc_v = category_income.get(name, Decimal("0"))
+            exp_v = category_expense.get(name, Decimal("0"))
+            bal_v = inc_v - exp_v
+            ws_cat.write_number(idx, 1, float(inc_v), fmt_money)
+            ws_cat.write_number(idx, 2, float(exp_v), fmt_money)
+            ws_cat.write_number(idx, 3, float(bal_v), fmt_money if bal_v >= 0 else fmt_money_red)
+
+        # Итоговая строка
+        total_row = len(cat_names) + 1
+        ws_cat.write(total_row, 0, "ИТОГО", fmt_header_strong)
+        ws_cat.write_number(total_row, 1, float(total_income), fmt_money_bold)
+        ws_cat.write_number(total_row, 2, float(total_expenses), fmt_money_bold)
+        ws_cat.write_number(
+            total_row,
+            3,
+            float(net),
+            fmt_money_bold if net >= 0 else fmt_money_bold_red,
+        )
 
         # График: расходы по категориям (top 10)
         if cat_names:
@@ -241,28 +285,29 @@ class ReportExportService:
                 reverse=True,
             )[:10]
 
-            ws_summary.write(8, 0, "Топ расходов по категориям", fmt_h2)
-            ws_summary.write(9, 0, "Категория", fmt_header)
-            ws_summary.write(9, 1, "Расходы", fmt_header)
-            for i, (n, v) in enumerate(top_exp, start=10):
+            # топ-10 на сводке — ниже пояснений, чтобы не мешать
+            ws_summary.write(13, 0, "Топ расходов по категориям", fmt_h2)
+            ws_summary.write(14, 0, "Категория", fmt_header)
+            ws_summary.write(14, 1, "Расходы", fmt_header)
+            for i, (n, v) in enumerate(top_exp, start=15):
                 ws_summary.write(i, 0, n)
                 ws_summary.write_number(i, 1, float(v), fmt_money)
 
-            last_row = 10 + len(top_exp) - 1
+            last_row = 15 + len(top_exp) - 1
             chart_exp_cat = workbook.add_chart({"type": "column"})
             chart_exp_cat.add_series(
                 {
                     "name": "Расходы",
-                    "categories": ["Summary", 10, 0, last_row, 0],
-                    "values": ["Summary", 10, 1, last_row, 1],
+                    "categories": ["Сводка", 15, 0, last_row, 0],
+                    "values": ["Сводка", 15, 1, last_row, 1],
                 }
             )
             chart_exp_cat.set_title({"name": "Расходы по категориям (топ-10)"})
             chart_exp_cat.set_y_axis({"name": "₽"})
             ws_summary.insert_chart("D20", chart_exp_cat, {"x_scale": 1.2, "y_scale": 1.2})
 
-        # ---- sheet: Transactions ----
-        ws_tx = workbook.add_worksheet("Transactions")
+        # ---- sheet: Транзакции ----
+        ws_tx = workbook.add_worksheet("Транзакции")
         ws_tx.freeze_panes(1, 0)
         ws_tx.set_column("A:A", 12)
         ws_tx.set_column("B:B", 10)
