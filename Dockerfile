@@ -28,6 +28,7 @@ RUN pip install --upgrade pip && \
         "drf-spectacular>=0.28.0,<0.29.0" \
         "python-telegram-bot>=22.3,<23.0" \
         "django-redis>=5.4.0,<6.0.0" \
+        "xlsxwriter>=3.2.0,<4.0.0" \
         "gunicorn>=22.0.0,<23.0.0"
 
 # Дефолтная команда (в docker-compose переопределяется)
