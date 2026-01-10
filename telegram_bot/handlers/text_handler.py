@@ -1,4 +1,5 @@
 import logging
+from decimal import Decimal
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import ContextTypes
 from asgiref.sync import sync_to_async
@@ -54,6 +55,43 @@ class TextHandler(BaseHandler):
                 return
             
             # --- Обработка состояний редактирования (дата/комментарий) ---
+            # Сначала проверим, не находится ли пользователь в режиме редактирования суммы транзакции
+            if context.user_data.get('editing_transaction_amount'):
+                transaction_id = context.user_data.get('editing_transaction_amount')
+                text = update.message.text.strip().replace(' ', '').replace(',', '.')
+                try:
+                    new_amount = Decimal(text)
+                    if new_amount <= 0:
+                        raise ValueError("amount<=0")
+
+                    user = await sync_to_async(lambda: telegram_user.user)()
+                    transaction_service = TransactionService(user)
+                    updated = await transaction_service.update_transaction_amount(
+                        transaction_id,
+                        new_amount,
+                    )
+
+                    if updated:
+                        keyboard = ActionKeyboard.get_transaction_actions_keyboard(transaction_id)
+                        await context.bot.send_message(
+                            chat_id=update.effective_chat.id,
+                            text=f"✅ Сумма транзакции обновлена на {abs(updated.amount):,.2f}₽",
+                            reply_markup=keyboard,
+                        )
+                    else:
+                        await context.bot.send_message(
+                            chat_id=update.effective_chat.id,
+                            text="❌ Транзакция не найдена или недоступна.",
+                        )
+                except Exception:
+                    await context.bot.send_message(
+                        chat_id=update.effective_chat.id,
+                        text="❌ Неверный формат суммы. Пример: 5000 или 499.90",
+                    )
+                finally:
+                    context.user_data.pop('editing_transaction_amount', None)
+                return
+
             # Сначала проверим, не находится ли пользователь в режиме редактирования даты транзакции
             if context.user_data.get('editing_transaction_date'):
                 transaction_id = context.user_data.get('editing_transaction_date')

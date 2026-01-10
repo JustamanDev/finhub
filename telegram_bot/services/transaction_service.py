@@ -119,6 +119,34 @@ class TransactionService:
             return transaction
         except Transaction.DoesNotExist:
             return None
+
+    async def update_transaction_amount(
+        self,
+        transaction_id: int,
+        new_amount: Decimal,
+    ) -> Optional[Transaction]:
+        """
+        Обновляет сумму транзакции.
+
+        Сохраняет семантику знака:
+        - для расходов сумма хранится отрицательной
+        - для доходов сумма хранится положительной
+        """
+        try:
+            transaction = await Transaction.objects.aget(
+                id=transaction_id,
+                user=self.user,
+            )
+
+            if transaction.category.type == 'expense':
+                transaction.amount = -abs(new_amount)
+            else:
+                transaction.amount = abs(new_amount)
+
+            await transaction.asave()
+            return transaction
+        except Transaction.DoesNotExist:
+            return None
     
     async def delete_transaction(
         self,
