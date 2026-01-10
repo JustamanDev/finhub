@@ -26,7 +26,11 @@ class ActionKeyboard:
         buttons = [
             [
                 InlineKeyboardButton(
-                    text="📅 Уточнить дату",
+                    text="✏️ Сумма",
+                    callback_data=f"edit_amount_{transaction_id}",
+                ),
+                InlineKeyboardButton(
+                    text="📅 Дата",
                     callback_data=f"edit_date_{transaction_id}",
                 ),
                 InlineKeyboardButton(

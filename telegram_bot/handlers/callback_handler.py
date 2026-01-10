@@ -424,12 +424,32 @@ class CallbackHandler(BaseHandler):
         telegram_user,
     ) -> None:
         """Обрабатывает редактирование транзакции"""
-        # edit_date_123 или edit_comment_123
+        # edit_amount_123 / edit_date_123 / edit_comment_123
         parts = query.data.split('_')
         edit_type = parts[1]
         transaction_id = int(parts[2])
 
-        if edit_type == 'date':
+        if edit_type == 'amount':
+            context.user_data['editing_transaction_amount'] = transaction_id
+
+            keyboard = InlineKeyboardMarkup([
+                [
+                    InlineKeyboardButton(
+                        text="🔙 Отмена",
+                        callback_data=f"transaction_actions_{transaction_id}",
+                    ),
+                    InlineKeyboardButton(
+                        text="🏠 Главное меню",
+                        callback_data="main_menu",
+                    ),
+                ],
+            ])
+
+            await query.edit_message_text(
+                "✏️ Введите новую сумму (например: 5000 или 499.90):",
+                reply_markup=keyboard,
+            )
+        elif edit_type == 'date':
             # Устанавливаем состояние ожидания ввода даты
             context.user_data['editing_transaction_date'] = transaction_id
 
@@ -1127,10 +1147,27 @@ class CallbackHandler(BaseHandler):
         from telegram_bot.keyboards.actions import ActionKeyboard
         
         keyboard = ActionKeyboard.get_main_menu_keyboard()
-        
-        await query.edit_message_text(
-            text="🏠 Главное меню FinHub\n\n"
-                 "Выберите действие:",
+
+        # Вариант A: не редактируем текущее сообщение (иначе исчезнут кнопки
+        # действий по транзакции/редактированию). Вместо этого отправляем новое.
+        #
+        # При этом сбрасываем transient-состояния ввода, чтобы следующий текст
+        # не был случайно обработан как "введите дату/комментарий/сумму".
+        for key in (
+            'editing_transaction_amount',
+            'editing_transaction_date',
+            'editing_transaction_comment',
+            'waiting_for_budget_amount',
+            'budget_category_id',
+            'editing_budget_id',
+            'limit_creation',
+            'renaming_category_id',
+        ):
+            context.user_data.pop(key, None)
+
+        await query.answer()
+        await query.message.reply_text(
+            text="🏠 Главное меню FinHub\n\nВыберите действие:",
             reply_markup=keyboard,
         )
     
