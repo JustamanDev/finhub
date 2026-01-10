@@ -239,6 +239,12 @@ class CallbackHandler(BaseHandler):
             elif query.data == "report_all":
                 logger.info("Вызываем _handle_report_all")
                 await self._handle_report_all(query, context, telegram_user)
+            elif query.data == "report_export_excel_current":
+                logger.info("Вызываем _handle_report_export_excel_current")
+                await self._handle_report_export_excel_current(query, context, telegram_user)
+            elif query.data.startswith("report_export_excel_"):
+                logger.info("Вызываем _handle_report_export_excel_period")
+                await self._handle_report_export_excel_period(query, context, telegram_user)
             elif query.data.startswith("report_prev_"):
                 logger.info("Вызываем _handle_report_navigation")
                 await self._handle_report_navigation(query, context, telegram_user)
@@ -1219,6 +1225,51 @@ class CallbackHandler(BaseHandler):
             context,
             telegram_user,
         )
+
+    async def _handle_report_export_excel_current(
+        self,
+        query: CallbackQuery,
+        context: ContextTypes.DEFAULT_TYPE,
+        telegram_user,
+    ) -> None:
+        """Экспорт Excel за текущий месяц"""
+        from datetime import datetime
+        from telegram_bot.handlers.report_handler import ReportHandler
+
+        now = datetime.now()
+        report_handler = ReportHandler()
+        await report_handler.handle_export_excel_month(
+            query,
+            context,
+            telegram_user,
+            now.year,
+            now.month,
+        )
+
+    async def _handle_report_export_excel_period(
+        self,
+        query: CallbackQuery,
+        context: ContextTypes.DEFAULT_TYPE,
+        telegram_user,
+    ) -> None:
+        """Экспорт Excel за выбранный период"""
+        from telegram_bot.handlers.report_handler import ReportHandler
+
+        # report_export_excel_2026_01
+        parts = query.data.split('_')
+        if len(parts) >= 5:
+            year = int(parts[3])
+            month = int(parts[4])
+            report_handler = ReportHandler()
+            await report_handler.handle_export_excel_month(
+                query,
+                context,
+                telegram_user,
+                year,
+                month,
+            )
+        else:
+            await query.answer("Ошибка: неверный период для экспорта")
     
     async def _handle_report_navigation(
         self,
