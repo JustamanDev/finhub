@@ -101,7 +101,16 @@ class GoalLedgerEntry(TimestampedModel):
             '-id',
         ]
         indexes = [
-            models.Index(fields=['goal', 'occurred_at']),
+            # Важно: имя индекса фиксируем явно, чтобы состояние моделей
+            # совпадало с миграциями и не возникало "changes not reflected"
+            # при `manage.py migrate`.
+            models.Index(
+                fields=[
+                    'goal',
+                    'occurred_at',
+                ],
+                name='goals_goall_goal_id_b2f0f5_idx',
+            ),
         ]
 
     def __str__(self) -> str:
