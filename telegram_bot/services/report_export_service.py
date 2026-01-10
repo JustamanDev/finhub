@@ -8,7 +8,13 @@ from typing import Iterable
 
 from asgiref.sync import sync_to_async
 from django.contrib.auth.models import User
+from django.db import models
+from django.utils import timezone
 
+from goals.models import (
+    Goal,
+    GoalLedgerEntry,
+)
 from transactions.models import Transaction
 
 logger = logging.getLogger(__name__)
@@ -38,6 +44,9 @@ class ReportExportService:
     ) -> ExcelExportResult:
         start_date, end_date = self._month_range(year, month)
         transactions = await self._get_transactions(start_date, end_date)
+        goals = await self._get_goals()
+        goal_balances = await self._get_goal_balances()
+        goal_entries = await self._get_goal_entries(start_date, end_date)
 
         report_title = f"FinHub — отчет за {month:02d}.{year}"
         filename = f"finhub_report_{year}-{month:02d}.xlsx"
@@ -47,6 +56,9 @@ class ReportExportService:
             start_date=start_date,
             end_date=end_date,
             transactions=transactions,
+            goals=goals,
+            goal_balances=goal_balances,
+            goal_entries=goal_entries,
         )
 
         return ExcelExportResult(
@@ -79,12 +91,50 @@ class ReportExportService:
         )
         return await sync_to_async(list)(qs)
 
+    async def _get_goals(self) -> list[Goal]:
+        return await sync_to_async(list)(
+            Goal.objects.filter(user=self.user).order_by('created_at', 'id')
+        )
+
+    async def _get_goal_balances(self) -> dict[int, Decimal]:
+        qs = (
+            GoalLedgerEntry.objects.filter(goal__user=self.user)
+            .values('goal_id')
+            .annotate(total=models.Sum('amount'))
+        )
+        rows = await sync_to_async(list)(qs)
+        return {
+            int(r['goal_id']): Decimal(r['total'] or 0)
+            for r in rows
+        }
+
+    async def _get_goal_entries(
+        self,
+        start_date: date,
+        end_date: date,
+    ) -> list[GoalLedgerEntry]:
+        start_dt = timezone.make_aware(datetime(start_date.year, start_date.month, start_date.day))
+        end_dt = timezone.make_aware(datetime(end_date.year, end_date.month, end_date.day))
+        qs = (
+            GoalLedgerEntry.objects.filter(
+                goal__user=self.user,
+                occurred_at__gte=start_dt,
+                occurred_at__lt=end_dt,
+            )
+            .select_related('goal')
+            .order_by('occurred_at', 'id')
+        )
+        return await sync_to_async(list)(qs)
+
     def _render_excel(
         self,
         report_title: str,
         start_date: date,
         end_date: date,
         transactions: Iterable[Transaction],
+        goals: list[Goal],
+        goal_balances: dict[int, Decimal],
+        goal_entries: list[GoalLedgerEntry],
     ) -> bytes:
         try:
             import xlsxwriter
@@ -129,6 +179,7 @@ class ReportExportService:
         # ---- агрегаты ----
         daily_income: dict[date, Decimal] = defaultdict(lambda: Decimal("0"))
         daily_expense: dict[date, Decimal] = defaultdict(lambda: Decimal("0"))
+        daily_allocations: dict[date, Decimal] = defaultdict(lambda: Decimal("0"))
 
         category_income: dict[str, Decimal] = defaultdict(lambda: Decimal("0"))
         category_expense: dict[str, Decimal] = defaultdict(lambda: Decimal("0"))
@@ -159,9 +210,20 @@ class ReportExportService:
                 }
             )
 
+        # Цели (ledger): дневные аллокации в цели (net)
+        allocations_month = Decimal("0")
+        deposits_by_goal: dict[int, Decimal] = defaultdict(lambda: Decimal("0"))
+        for e in goal_entries:
+            d = e.occurred_at.date()
+            daily_allocations[d] += Decimal(e.amount)
+            allocations_month += Decimal(e.amount)
+            if e.amount > 0:
+                deposits_by_goal[int(e.goal_id)] += Decimal(e.amount)
+
         total_income = sum(category_income.values(), Decimal("0"))
         total_expenses = sum(category_expense.values(), Decimal("0"))
-        net = total_income - total_expenses
+        net = total_income - total_expenses  # доходы - расходы (без целей)
+        free_net = net - allocations_month   # свободно с учетом целей
 
         # ---- sheet: Сводка ----
         ws_summary = workbook.add_worksheet("Сводка")
@@ -184,17 +246,26 @@ class ReportExportService:
         ws_summary.write_number(4, 1, float(total_income), fmt_money)
         ws_summary.write(5, 0, "Расходы", fmt_h2)
         ws_summary.write_number(5, 1, float(total_expenses), fmt_money)
-        ws_summary.write(6, 0, "Чистый денежный поток", fmt_h2)
+        ws_summary.write(6, 0, "Денежный поток (доходы − расходы)", fmt_h2)
         ws_summary.write_number(6, 1, float(net), fmt_money if net >= 0 else fmt_money_red)
+        ws_summary.write(7, 0, "Отложено в цели (net)", fmt_h2)
+        ws_summary.write_number(
+            7,
+            1,
+            float(allocations_month),
+            fmt_money if allocations_month >= 0 else fmt_money_red,
+        )
+        ws_summary.write(8, 0, "Свободно (с учетом целей)", fmt_h2)
+        ws_summary.write_number(8, 1, float(free_net), fmt_money if free_net >= 0 else fmt_money_red)
 
-        ws_summary.write(8, 0, "Как читать этот отчет", fmt_h2)
+        ws_summary.write(10, 0, "Как читать этот отчет", fmt_h2)
         ws_summary.write(
-            9,
+            11,
             0,
-            "• Сальдо дня = Доходы − Расходы за конкретный день.\n"
+            "• Сальдо дня (с учетом целей) = Доходы − Расходы − Отложено в цели (за день).\n"
             "• Накопленное сальдо = сумма «Сальдо дня» с начала месяца (стартуем с 0).\n"
-            "  Это НЕ «баланс банковского счета», а динамика результата за месяц.\n"
-            "  Если линия растет — месяц в плюсе; если падает — расходы обгоняют доходы.",
+            "  Это НЕ «баланс банковского счета», а динамика «свободно для трат» за месяц.\n"
+            "• «Отложено в цели» — резервирование денег. Это не расход, но уменьшает «свободно».",
             fmt_note,
         )
 
@@ -202,13 +273,14 @@ class ReportExportService:
         ws_cf = workbook.add_worksheet("Кэшфлоу")
         ws_cf.freeze_panes(1, 0)
         ws_cf.set_column("A:A", 14)
-        ws_cf.set_column("B:E", 20)
+        ws_cf.set_column("B:F", 22)
 
         ws_cf.write(0, 0, "Дата", fmt_header)
         ws_cf.write(0, 1, "Доходы", fmt_header)
         ws_cf.write(0, 2, "Расходы", fmt_header)
-        ws_cf.write(0, 3, "Сальдо дня", fmt_header)
-        ws_cf.write(0, 4, "Накопленное сальдо", fmt_header)
+        ws_cf.write(0, 3, "Отложено в цели (net)", fmt_header)
+        ws_cf.write(0, 4, "Сальдо дня (с учетом целей)", fmt_header)
+        ws_cf.write(0, 5, "Накопленное сальдо", fmt_header)
 
         # полный диапазон дней месяца
         day = start_date
@@ -217,14 +289,16 @@ class ReportExportService:
         while day < end_date:
             inc = daily_income.get(day, Decimal("0"))
             exp = daily_expense.get(day, Decimal("0"))
-            day_net = inc - exp
+            alloc = daily_allocations.get(day, Decimal("0"))
+            day_net = inc - exp - alloc
             cumulative += day_net
 
             ws_cf.write_datetime(r, 0, datetime(day.year, day.month, day.day), fmt_date)
             ws_cf.write_number(r, 1, float(inc), fmt_money)
             ws_cf.write_number(r, 2, float(exp), fmt_money)
-            ws_cf.write_number(r, 3, float(day_net), fmt_money if day_net >= 0 else fmt_money_red)
-            ws_cf.write_number(r, 4, float(cumulative), fmt_money if cumulative >= 0 else fmt_money_red)
+            ws_cf.write_number(r, 3, float(alloc), fmt_money if alloc >= 0 else fmt_money_red)
+            ws_cf.write_number(r, 4, float(day_net), fmt_money if day_net >= 0 else fmt_money_red)
+            ws_cf.write_number(r, 5, float(cumulative), fmt_money if cumulative >= 0 else fmt_money_red)
 
             r += 1
             day = date.fromordinal(day.toordinal() + 1)
@@ -235,12 +309,102 @@ class ReportExportService:
             {
                 "name": "Накопленное сальдо",
                 "categories": ["Кэшфлоу", 1, 0, r - 1, 0],
-                "values": ["Кэшфлоу", 1, 4, r - 1, 4],
+                "values": ["Кэшфлоу", 1, 5, r - 1, 5],
             }
         )
-        chart_balance.set_title({"name": "Динамика cashflow за месяц"})
+        chart_balance.set_title({"name": "Свободно для трат (с учетом целей)"})
         chart_balance.set_y_axis({"name": "₽"})
         ws_summary.insert_chart("D4", chart_balance, {"x_scale": 1.2, "y_scale": 1.2})
+
+        # ---- sheet: Цели ----
+        ws_goals = workbook.add_worksheet("Цели")
+        ws_goals.freeze_panes(1, 0)
+        ws_goals.set_column("A:A", 28)
+        ws_goals.set_column("B:B", 14)
+        ws_goals.set_column("C:E", 16)
+        ws_goals.set_column("F:F", 12)
+        ws_goals.set_column("G:I", 18)
+
+        ws_goals.write(0, 0, "Цель", fmt_header)
+        ws_goals.write(0, 1, "Дедлайн", fmt_header)
+        ws_goals.write(0, 2, "Цель (₽)", fmt_header)
+        ws_goals.write(0, 3, "Накоплено (₽)", fmt_header)
+        ws_goals.write(0, 4, "Осталось (₽)", fmt_header)
+        ws_goals.write(0, 5, "Прогресс (%)", fmt_header)
+        ws_goals.write(0, 6, "План/мес (₽)", fmt_header)
+        ws_goals.write(0, 7, "Внесено в этом месяце (₽)", fmt_header)
+        ws_goals.write(0, 8, "Осталось внести в этом месяце (₽)", fmt_header)
+
+        # as_of: конец периода или сегодня (если это текущий месяц)
+        as_of = min(timezone.localdate(), date.fromordinal(end_date.toordinal() - 1))
+        for i, g in enumerate(goals, start=1):
+            bal = goal_balances.get(int(g.id), Decimal("0"))
+            if bal < 0:
+                bal = Decimal("0")
+            target_amt = Decimal(g.target_amount)
+            remaining_amt = max(target_amt - bal, Decimal("0"))
+            pct = Decimal("0")
+            if target_amt > 0:
+                pct = (bal / target_amt) * Decimal("100")
+
+            plan_per_month = None
+            if g.deadline and g.deadline >= as_of:
+                months_remaining = (g.deadline.year - as_of.year) * 12 + (g.deadline.month - as_of.month) + 1
+                if months_remaining > 0:
+                    plan_per_month = (remaining_amt / Decimal(months_remaining)).quantize(Decimal("0.01"))
+
+            deposited_month = deposits_by_goal.get(int(g.id), Decimal("0"))
+            remaining_month = None
+            if plan_per_month is not None:
+                remaining_month = max(plan_per_month - deposited_month, Decimal("0"))
+
+            ws_goals.write(i, 0, g.title)
+            if g.deadline:
+                ws_goals.write_datetime(i, 1, datetime(g.deadline.year, g.deadline.month, g.deadline.day), fmt_date)
+            else:
+                ws_goals.write(i, 1, "")
+            ws_goals.write_number(i, 2, float(target_amt), fmt_money)
+            ws_goals.write_number(i, 3, float(bal), fmt_money)
+            ws_goals.write_number(i, 4, float(remaining_amt), fmt_money)
+            ws_goals.write_number(i, 5, float(pct), workbook.add_format({"num_format": "0.0"}))
+            if plan_per_month is not None:
+                ws_goals.write_number(i, 6, float(plan_per_month), fmt_money)
+            else:
+                ws_goals.write(i, 6, "")
+            ws_goals.write_number(i, 7, float(deposited_month), fmt_money)
+            if remaining_month is not None:
+                ws_goals.write_number(i, 8, float(remaining_month), fmt_money)
+            else:
+                ws_goals.write(i, 8, "")
+
+        # ---- sheet: Операции целей ----
+        ws_ops = workbook.add_worksheet("Операции целей")
+        ws_ops.freeze_panes(1, 0)
+        ws_ops.set_column("A:A", 12)
+        ws_ops.set_column("B:B", 28)
+        ws_ops.set_column("C:C", 16)
+        ws_ops.set_column("D:D", 16)
+        ws_ops.set_column("E:E", 50)
+
+        ws_ops.write(0, 0, "Дата", fmt_header)
+        ws_ops.write(0, 1, "Цель", fmt_header)
+        ws_ops.write(0, 2, "Тип", fmt_header)
+        ws_ops.write(0, 3, "Сумма (₽)", fmt_header)
+        ws_ops.write(0, 4, "Комментарий", fmt_header)
+
+        type_map = {
+            GoalLedgerEntry.DEPOSIT: "Пополнение",
+            GoalLedgerEntry.WITHDRAW: "Снятие",
+            GoalLedgerEntry.SPEND: "Покупка",
+        }
+        for i, e in enumerate(goal_entries, start=1):
+            d = e.occurred_at.date()
+            ws_ops.write_datetime(i, 0, datetime(d.year, d.month, d.day), fmt_date)
+            ws_ops.write(i, 1, e.goal.title if e.goal else "")
+            ws_ops.write(i, 2, type_map.get(e.entry_type, e.entry_type))
+            amt = Decimal(e.amount)
+            ws_ops.write_number(i, 3, float(amt), fmt_money if amt >= 0 else fmt_money_red)
+            ws_ops.write(i, 4, e.comment or "")
 
         # ---- sheet: Категории ----
         ws_cat = workbook.add_worksheet("Категории")
