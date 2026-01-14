@@ -129,3 +129,35 @@ class BotMessage(TimestampedModel):
         verbose_name = "Сообщение бота"
         verbose_name_plural = "Сообщения бота"
         ordering = ['-created_at']
+
+
+class BotText(TimestampedModel):
+    """
+    Тексты, которые можно менять через админку (без деплоя).
+
+    Примеры slug:
+    - welcome_message
+    - default_categories_message
+    """
+
+    slug = models.SlugField(
+        unique=True,
+        help_text="Уникальный ключ (например: welcome_message)",
+    )
+    title = models.CharField(
+        max_length=255,
+        blank=True,
+        help_text="Человеческое название (для админки)",
+    )
+    text = models.TextField()
+    is_active = models.BooleanField(default=True)
+
+    def __str__(self) -> str:
+        return self.slug
+
+    class Meta:
+        verbose_name = "Текст бота"
+        verbose_name_plural = "Тексты бота"
+        ordering = [
+            "slug",
+        ]

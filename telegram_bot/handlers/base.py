@@ -3,6 +3,7 @@ from typing import (
     Dict,
     Any,
     Optional,
+    Tuple,
 )
 from telegram import (
     Update,
@@ -17,6 +18,7 @@ from telegram_bot.models import (
     BotMessage,
 )
 from telegram_bot.utils.text_parser import TextCommandParser
+from categories.default_categories import ensure_default_categories_async
 
 logger = logging.getLogger(__name__)
 
@@ -26,7 +28,46 @@ class BaseHandler:
     
     def __init__(self):
         self.parser = None
-        
+
+    async def get_or_create_telegram_user_with_bootstrap(
+        self,
+        telegram_user: TelegramUserModel,
+    ) -> Tuple[TelegramUser, bool, int]:
+        """
+        Возвращает TelegramUser + флаги инициализации.
+
+        Returns:
+            (tg_user, is_new_user, defaults_created_count)
+        """
+        try:
+            tg_user = await TelegramUser.objects.aget(telegram_id=telegram_user.id)
+            return tg_user, False, 0
+        except TelegramUser.DoesNotExist:
+            # Создаем Django User
+            django_user = await User.objects.acreate(
+                username=f"tg_{telegram_user.id}",
+                first_name=telegram_user.first_name or "",
+                last_name=telegram_user.last_name or "",
+            )
+
+            # Создаем категории по умолчанию (идемпотентно)
+            defaults_created_count = await ensure_default_categories_async(django_user)
+
+            # Создаем TelegramUser
+            tg_user = await TelegramUser.objects.acreate(
+                user=django_user,
+                telegram_id=telegram_user.id,
+                username=telegram_user.username or "",
+                first_name=telegram_user.first_name or "",
+                last_name=telegram_user.last_name or "",
+                language_code=telegram_user.language_code or "ru",
+            )
+
+            # Создаем UserState
+            await UserState.objects.acreate(telegram_user=tg_user)
+
+            return tg_user, True, defaults_created_count
+
     async def get_or_create_telegram_user(
         self,
         telegram_user: TelegramUserModel,
@@ -40,31 +81,9 @@ class BaseHandler:
         Returns:
             Объект TelegramUser
         """
-        try:
-            tg_user = await TelegramUser.objects.aget(
-                telegram_id=telegram_user.id
-            )
-        except TelegramUser.DoesNotExist:
-            # Создаем Django User
-            django_user = await User.objects.acreate(
-                username=f"tg_{telegram_user.id}",
-                first_name=telegram_user.first_name or '',
-                last_name=telegram_user.last_name or '',
-            )
-            
-            # Создаем TelegramUser
-            tg_user = await TelegramUser.objects.acreate(
-                user=django_user,
-                telegram_id=telegram_user.id,
-                username=telegram_user.username or '',
-                first_name=telegram_user.first_name or '',
-                last_name=telegram_user.last_name or '',
-                language_code=telegram_user.language_code or 'ru',
-            )
-            
-            # Создаем UserState
-            await UserState.objects.acreate(telegram_user=tg_user)
-            
+        tg_user, _, _ = await self.get_or_create_telegram_user_with_bootstrap(
+            telegram_user
+        )
         return tg_user
     
     async def get_user_state(self, telegram_user: TelegramUser) -> UserState:

@@ -9,9 +9,58 @@ from telegram_bot.services.transaction_service import TransactionService
 
 logger = logging.getLogger(__name__)
 
+DEFAULT_WELCOME_MESSAGE = (
+    "👋 Привет, {first_name}!\n\n"
+    "💰 Я твой личный финансовый помощник FinHub!\n\n"
+    "📝 Как добавлять операции:\n"
+    "• 500 кофе - быстрый расход\n"
+    "• +1000 зарплата - быстрый доход\n"
+    "• 1500 - выбрать категорию\n\n"
+    "🎯 Используй кнопки ниже или просто пиши суммы!"
+)
+
+DEFAULT_DEFAULT_CATEGORIES_MESSAGE = (
+    "Для экономии времени я уже создал базовые категории доходов и расходов.\n"
+    "Ты можешь переименовать их, добавить свои или удалить лишние — как удобно."
+)
+
 
 class CommandHandler(BaseHandler):
     """Обработчик команд бота"""
+
+    @staticmethod
+    def _render_template(template: str, first_name: str) -> str:
+        """
+        Рендерит шаблон текста из админки безопасно.
+
+        Поддерживаем плейсхолдеры:
+        - {first_name}
+        - {firstName} (алиас)
+        """
+        # поддержка алиаса, чтобы пользователь мог писать camelCase
+        normalized = template.replace("{firstName}", "{first_name}")
+        try:
+            return normalized.format(first_name=first_name)
+        except Exception:
+            # если в тексте встретились неизвестные {placeholders} — не падаем
+            return template
+
+    async def _get_bot_text(self, slug: str, default: str) -> str:
+        from telegram_bot.models import BotText
+
+        try:
+            obj = await sync_to_async(
+                lambda: BotText.objects.filter(
+                    slug=slug,
+                    is_active=True,
+                ).first()
+            )()
+        except Exception:
+            return default
+
+        if not obj or not obj.text:
+            return default
+        return obj.text
     
     async def start_command(
         self,
@@ -26,19 +75,27 @@ class CommandHandler(BaseHandler):
             context: Контекст бота
         """
         try:
-            telegram_user = await self.get_or_create_telegram_user(
-                update.effective_user
+            telegram_user, is_new_user, defaults_created_count = (
+                await self.get_or_create_telegram_user_with_bootstrap(
+                    update.effective_user
+                )
             )
-            
-            welcome_text = (
-                f"👋 Привет, {update.effective_user.first_name}!\n\n"
-                "💰 Я твой личный финансовый помощник FinHub!\n\n"
-                "📝 Как добавлять операции:\n"
-                "• 500 кофе - быстрый расход\n"
-                "• +1000 зарплата - быстрый доход\n"
-                "• 1500 - выбрать категорию\n\n"
-                "🎯 Используй кнопки ниже или просто пиши суммы!"
+
+            welcome_template = await self._get_bot_text(
+                slug="welcome_message",
+                default=DEFAULT_WELCOME_MESSAGE,
             )
+            welcome_text = self._render_template(
+                welcome_template,
+                first_name=update.effective_user.first_name or "",
+            )
+
+            if is_new_user and defaults_created_count > 0:
+                defaults_message = await self._get_bot_text(
+                    slug="default_categories_message",
+                    default=DEFAULT_DEFAULT_CATEGORIES_MESSAGE,
+                )
+                welcome_text = f"{welcome_text}\n\n{defaults_message}"
             
             keyboard = ActionKeyboard.get_main_menu_keyboard()
             

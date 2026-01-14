@@ -104,3 +104,39 @@ class Category(TimestampedModel):
             bool: True если есть активный бюджет
         """
         return self.get_current_budget() is not None
+
+
+class DefaultCategoryTemplate(TimestampedModel):
+    """
+    Шаблон дефолтных категорий (управляется через админку).
+
+    Используется для создания стартового набора категорий для новых пользователей.
+    """
+
+    name = models.CharField("Название", max_length=100)
+    type = models.CharField("Тип", max_length=10, choices=Category.TYPE_CHOICES)
+    color = models.CharField("Цвет", max_length=7, default="#007BFF")
+    icon = models.CharField("Иконка", max_length=50, default="💰")
+    sort_order = models.PositiveIntegerField("Порядок", default=0)
+    is_active = models.BooleanField("Активна", default=True)
+
+    class Meta:
+        verbose_name = "Шаблон категории по умолчанию"
+        verbose_name_plural = "Шаблоны категорий по умолчанию"
+        ordering = [
+            "type",
+            "sort_order",
+            "name",
+        ]
+        constraints = [
+            models.UniqueConstraint(
+                fields=[
+                    "type",
+                    "name",
+                ],
+                name="unique_default_category_template",
+            ),
+        ]
+
+    def __str__(self) -> str:
+        return f"{self.icon} {self.name} ({self.get_type_display()})"

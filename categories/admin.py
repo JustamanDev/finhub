@@ -1,5 +1,8 @@
 from django.contrib import admin
-from .models import Category
+from .models import (
+    Category,
+    DefaultCategoryTemplate,
+)
 
 
 @admin.register(Category)
@@ -50,3 +53,31 @@ class CategoryAdmin(admin.ModelAdmin):
         if not change:  # Создание новой категории
             obj.user = request.user
         super().save_model(request, obj, form, change)
+
+
+@admin.register(DefaultCategoryTemplate)
+class DefaultCategoryTemplateAdmin(admin.ModelAdmin):
+    list_display = [
+        "name",
+        "type",
+        "icon",
+        "color",
+        "sort_order",
+        "is_active",
+        "updated_at",
+    ]
+    list_filter = [
+        "type",
+        "is_active",
+    ]
+    search_fields = [
+        "name",
+    ]
+    list_editable = [
+        "is_active",
+        "sort_order",
+    ]
+    readonly_fields = [
+        "created_at",
+        "updated_at",
+    ]
