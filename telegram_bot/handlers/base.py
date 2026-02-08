@@ -18,6 +18,7 @@ from telegram_bot.models import (
     BotMessage,
 )
 from telegram_bot.utils.text_parser import TextCommandParser
+from telegram_bot.utils.admin_alerts import notify_admins_about_exception
 from categories.default_categories import ensure_default_categories_async
 
 logger = logging.getLogger(__name__)
@@ -156,6 +157,17 @@ class BaseHandler:
             error: Исключение
         """
         logger.error(f"Ошибка в обработчике: {error}", exc_info=True)
+
+        try:
+            await notify_admins_about_exception(
+                context.bot,
+                error=error,
+                where="BaseHandler.handle_error",
+                update_repr=repr(update),
+            )
+        except Exception:
+            # Never break user flow due to alerting.
+            pass
         
         if update.effective_chat:
             await context.bot.send_message(

@@ -11,6 +11,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Iterable
 
+from asgiref.sync import sync_to_async
 from django.contrib.auth.models import User
 
 from categories.models import (
@@ -112,14 +113,7 @@ DEFAULT_CATEGORIES: tuple[DefaultCategory, ...] = (
 
 
 def iter_default_categories() -> Iterable[DefaultCategory]:
-    templates = list(
-        DefaultCategoryTemplate.objects.filter(is_active=True).order_by(
-            "type",
-            "sort_order",
-            "name",
-            "id",
-        )
-    )
+    templates = list(_get_default_template_queryset())
 
     if templates:
         return [
@@ -133,6 +127,38 @@ def iter_default_categories() -> Iterable[DefaultCategory]:
         ]
 
     return DEFAULT_CATEGORIES
+
+
+def _get_default_template_queryset():
+    return DefaultCategoryTemplate.objects.filter(is_active=True).order_by(
+        "type",
+        "sort_order",
+        "name",
+        "id",
+    )
+
+
+async def iter_default_categories_async() -> list[DefaultCategory]:
+    """
+    Async-safe version of iter_default_categories().
+    """
+    templates = await sync_to_async(
+        lambda: list(_get_default_template_queryset()),
+        thread_sensitive=True,
+    )()
+
+    if templates:
+        return [
+            DefaultCategory(
+                name=t.name,
+                icon=t.icon,
+                color=t.color,
+                category_type=t.type,
+            )
+            for t in templates
+        ]
+
+    return list(DEFAULT_CATEGORIES)
 
 
 def ensure_default_categories(user: User) -> int:
@@ -164,7 +190,7 @@ async def ensure_default_categories_async(user: User) -> int:
     Async version of ensure_default_categories() for bot runtime.
     """
     created_count = 0
-    for item in iter_default_categories():
+    for item in await iter_default_categories_async():
         _, created = await Category.objects.aget_or_create(
             user=user,
             name=item.name,
