@@ -51,6 +51,11 @@ MEDIA_ROOT=/var/www/finhub/media/
 
 # Error Tracking (optional)
 SENTRY_DSN=
+
+# Telegram Admin Alerts (optional)
+# Comma-separated chat IDs that will receive bot error alerts.
+# Example: TELEGRAM_ADMIN_CHAT_IDS=123456789,987654321
+TELEGRAM_ADMIN_CHAT_IDS=
 ```
 
 ## 🔄 Переключение между окружениями

@@ -15,6 +15,7 @@ from telegram.ext import (
 from telegram_bot.handlers.text_handler import TextHandler
 from telegram_bot.handlers.callback_handler import CallbackHandler
 from telegram_bot.handlers.command_handler import CommandHandler as BotCommandHandler
+from telegram_bot.utils.admin_alerts import notify_admins_about_exception
 
 logger = logging.getLogger(__name__)
 
@@ -138,6 +139,16 @@ class Command(BaseCommand):
                     f'Ошибка при обработке обновления {update}: {context.error}',
                     exc_info=context.error,
                 )
+
+                try:
+                    await notify_admins_about_exception(
+                        context.bot,
+                        error=context.error,
+                        where="run_bot.error_handler",
+                        update_repr=repr(update),
+                    )
+                except Exception:
+                    pass
             
             application.add_error_handler(error_handler)
 
