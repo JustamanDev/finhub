@@ -145,7 +145,7 @@ class Command(BaseCommand):
                         context.bot,
                         error=context.error,
                         where="run_bot.error_handler",
-                        update_repr=repr(update),
+                        update=update,
                     )
                 except Exception:
                     pass
