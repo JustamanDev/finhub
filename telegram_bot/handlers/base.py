@@ -11,6 +11,7 @@ from telegram import (
 )
 from telegram.ext import ContextTypes
 from django.contrib.auth.models import User
+from django.db import IntegrityError
 
 from telegram_bot.models import (
     TelegramUser,
@@ -40,34 +41,55 @@ class BaseHandler:
         Returns:
             (tg_user, is_new_user, defaults_created_count)
         """
+        telegram_id = telegram_user.id
+        django_username = f"tg_{telegram_id}"
+
+        # Fast path: TelegramUser exists
         try:
-            tg_user = await TelegramUser.objects.aget(telegram_id=telegram_user.id)
+            tg_user = await TelegramUser.objects.aget(telegram_id=telegram_id)
             return tg_user, False, 0
         except TelegramUser.DoesNotExist:
-            # Создаем Django User
-            django_user = await User.objects.acreate(
-                username=f"tg_{telegram_user.id}",
-                first_name=telegram_user.first_name or "",
-                last_name=telegram_user.last_name or "",
-            )
+            pass
 
-            # Создаем категории по умолчанию (идемпотентно)
+        # Idempotent bootstrap. Must be resilient to:
+        # - partially created auth.User (username exists) without TelegramUser
+        # - concurrent updates (/start + /help) racing to create the same records
+        django_user, _ = await User.objects.aget_or_create(
+            username=django_username,
+            defaults={
+                "first_name": telegram_user.first_name or "",
+                "last_name": telegram_user.last_name or "",
+            },
+        )
+
+        try:
+            tg_user, tg_created = await TelegramUser.objects.aget_or_create(
+                telegram_id=telegram_id,
+                defaults={
+                    "user": django_user,
+                    "username": telegram_user.username or "",
+                    "first_name": telegram_user.first_name or "",
+                    "last_name": telegram_user.last_name or "",
+                    "language_code": telegram_user.language_code or "ru",
+                    "is_active": True,
+                },
+            )
+        except IntegrityError:
+            # Race: someone created it between our check and create.
+            tg_user = await TelegramUser.objects.aget(telegram_id=telegram_id)
+            tg_created = False
+
+        # Ensure state exists (idempotent)
+        await UserState.objects.aget_or_create(telegram_user=tg_user)
+
+        # Ensure categories exist (idempotent). Run after TelegramUser exists,
+        # so even if categories fail, user won't get stuck in bootstrap.
+        try:
             defaults_created_count = await ensure_default_categories_async(django_user)
+        except Exception:
+            defaults_created_count = 0
 
-            # Создаем TelegramUser
-            tg_user = await TelegramUser.objects.acreate(
-                user=django_user,
-                telegram_id=telegram_user.id,
-                username=telegram_user.username or "",
-                first_name=telegram_user.first_name or "",
-                last_name=telegram_user.last_name or "",
-                language_code=telegram_user.language_code or "ru",
-            )
-
-            # Создаем UserState
-            await UserState.objects.acreate(telegram_user=tg_user)
-
-            return tg_user, True, defaults_created_count
+        return tg_user, tg_created, defaults_created_count
 
     async def get_or_create_telegram_user(
         self,
@@ -163,7 +185,7 @@ class BaseHandler:
                 context.bot,
                 error=error,
                 where="BaseHandler.handle_error",
-                update_repr=repr(update),
+                update=update,
             )
         except Exception:
             # Never break user flow due to alerting.

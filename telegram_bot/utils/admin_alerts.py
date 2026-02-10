@@ -48,12 +48,56 @@ def _dedupe_key(parts: Iterable[str]) -> str:
     return h.hexdigest()
 
 
+def _safe_getattr(obj, attr: str):
+    try:
+        return getattr(obj, attr, None)
+    except Exception:
+        return None
+
+
+def summarize_update(update) -> str:
+    """
+    Create a short, stable update summary for alerts.
+    """
+    if update is None:
+        return ""
+
+    update_id = _safe_getattr(update, "update_id")
+    effective_chat = _safe_getattr(update, "effective_chat")
+    effective_user = _safe_getattr(update, "effective_user")
+
+    chat_id = _safe_getattr(effective_chat, "id")
+    chat_type = _safe_getattr(effective_chat, "type")
+    user_id = _safe_getattr(effective_user, "id")
+    username = _safe_getattr(effective_user, "username")
+
+    message = _safe_getattr(update, "message")
+    callback_query = _safe_getattr(update, "callback_query")
+
+    text = _safe_getattr(message, "text")
+    callback_data = _safe_getattr(callback_query, "data")
+
+    parts = [
+        f"update_id={update_id}",
+        f"chat_id={chat_id}",
+        f"chat_type={chat_type}",
+        f"user_id={user_id}",
+    ]
+    if username:
+        parts.append(f"username=@{username}")
+    if text:
+        parts.append(f"text={text!r}")
+    if callback_data:
+        parts.append(f"callback={callback_data!r}")
+    return ", ".join(parts)
+
+
 async def notify_admins_about_exception(
     bot,
     *,
     error: BaseException,
     where: str,
-    update_repr: Optional[str] = None,
+    update=None,
     extra: Optional[str] = None,
     ttl_seconds: int = 300,
 ) -> None:
@@ -70,14 +114,22 @@ async def notify_admins_about_exception(
 
     error_type = type(error).__name__
     error_text = str(error)
-    update_text = update_repr or ""
+
+    update_summary = summarize_update(update)
+
+    tb_fingerprint = ""
+    try:
+        tb_fingerprint = "".join(traceback.format_tb(error.__traceback__)[-6:])
+    except Exception:
+        tb_fingerprint = ""
 
     key = _dedupe_key(
         [
             where,
             error_type,
             error_text,
-            update_text,
+            tb_fingerprint,
+            update_summary,
         ]
     )
     cache_key = f"admin_alert:{key}"
@@ -99,8 +151,8 @@ async def notify_admins_about_exception(
         f"Type: {error_type}\n"
         f"Error: {error_text}\n"
     )
-    if update_repr:
-        message += f"\nUpdate: {update_repr}\n"
+    if update_summary:
+        message += f"\nUpdate: {update_summary}\n"
     if extra:
         message += f"\nExtra: {extra}\n"
 
