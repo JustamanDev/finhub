@@ -26,7 +26,7 @@ RUN pip install --upgrade pip && \
         "djoser>=2.3.3,<3.0.0" \
         "django-ratelimit>=4.1.0,<5.0.0" \
         "drf-spectacular>=0.28.0,<0.29.0" \
-        "python-telegram-bot>=22.3,<23.0" \
+        "python-telegram-bot[socks]>=22.3,<23.0" \
         "django-redis>=5.4.0,<6.0.0" \
         "xlsxwriter>=3.2.0,<4.0.0" \
         "gunicorn>=22.0.0,<23.0.0"
