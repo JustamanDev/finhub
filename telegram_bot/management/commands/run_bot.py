@@ -31,6 +31,35 @@ def _env_int(name: str, default: int) -> int:
         return default
 
 
+def _get_proxy_url() -> str | None:
+    raw = os.getenv("TELEGRAM_PROXY_URL", "").strip()
+    return raw or None
+
+
+def _build_httpx_request(
+    *,
+    connect_timeout: int,
+    read_timeout: int,
+    write_timeout: int,
+    pool_timeout: int,
+    proxy_url: str | None,
+) -> HTTPXRequest:
+    kwargs = {
+        "connect_timeout": connect_timeout,
+        "read_timeout": read_timeout,
+        "write_timeout": write_timeout,
+        "pool_timeout": pool_timeout,
+    }
+    if not proxy_url:
+        return HTTPXRequest(**kwargs)
+
+    try:
+        return HTTPXRequest(proxy=proxy_url, **kwargs)
+    except TypeError:
+        # Compatibility for PTB versions that still use `proxy_url`.
+        return HTTPXRequest(proxy_url=proxy_url, **kwargs)
+
+
 class Command(BaseCommand):
     """Команда для запуска Telegram бота"""
     
@@ -100,18 +129,24 @@ class Command(BaseCommand):
             token: Токен Telegram бота
         """
         try:
-            request = HTTPXRequest(
+            proxy_url = _get_proxy_url()
+            if proxy_url:
+                logger.info("Telegram proxy is enabled: %s", proxy_url)
+
+            request = _build_httpx_request(
                 connect_timeout=_env_int("TELEGRAM_CONNECT_TIMEOUT", 10),
                 read_timeout=_env_int("TELEGRAM_READ_TIMEOUT", 30),
                 write_timeout=_env_int("TELEGRAM_WRITE_TIMEOUT", 30),
                 pool_timeout=_env_int("TELEGRAM_POOL_TIMEOUT", 10),
+                proxy_url=proxy_url,
             )
 
-            get_updates_request = HTTPXRequest(
+            get_updates_request = _build_httpx_request(
                 connect_timeout=_env_int("TELEGRAM_CONNECT_TIMEOUT", 10),
                 read_timeout=_env_int("TELEGRAM_GET_UPDATES_READ_TIMEOUT", 45),
                 write_timeout=_env_int("TELEGRAM_WRITE_TIMEOUT", 30),
                 pool_timeout=_env_int("TELEGRAM_POOL_TIMEOUT", 10),
+                proxy_url=proxy_url,
             )
 
             # Создаем приложение
