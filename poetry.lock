@@ -574,6 +574,7 @@ anyio = "*"
 certifi = "*"
 httpcore = "==1.*"
 idna = "*"
+socksio = {version = "==1.*", optional = true, markers = "extra == \"socks\""}
 
 [package.extras]
 brotli = ["brotli ; platform_python_implementation == \"CPython\"", "brotlicffi ; platform_python_implementation != \"CPython\""]
@@ -786,23 +787,27 @@ files = [
 
 [[package]]
 name = "python-telegram-bot"
-version = "22.3"
+version = "22.7"
 description = "We have made you a wrapper you can't refuse"
 optional = false
-python-versions = ">=3.9"
+python-versions = ">=3.10"
 groups = ["main"]
 files = [
-    {file = "python_telegram_bot-22.3-py3-none-any.whl", hash = "sha256:88fab2d1652dbfd5379552e8b904d86173c524fdb9270d3a8685f599ffe0299f"},
-    {file = "python_telegram_bot-22.3.tar.gz", hash = "sha256:513d5ab9db96dcf25272dad0a726555e80edf60d09246a7d0d425b77115f5440"},
+    {file = "python_telegram_bot-22.7-py3-none-any.whl", hash = "sha256:d72eed532cf763758cd9331b57a6d790aff0bb4d37d8f4e92149436fe21c6475"},
+    {file = "python_telegram_bot-22.7.tar.gz", hash = "sha256:784b59ea3852fe4616ad63b4a0264c755637f5d725e87755ecdee28300febf61"},
 ]
 
 [package.dependencies]
-httpx = ">=0.27,<0.29"
+httpcore = {version = ">=1.0.9", markers = "python_version >= \"3.14\""}
+httpx = [
+    {version = ">=0.27,<0.29"},
+    {version = "*", extras = ["socks"], optional = true, markers = "extra == \"socks\""},
+]
 
 [package.extras]
-all = ["aiolimiter (>=1.1,<1.3)", "apscheduler (>=3.10.4,<3.12.0)", "cachetools (>=5.3.3,<6.2.0)", "cffi (>=1.17.0rc1) ; python_version > \"3.12\"", "cryptography (>=39.0.1)", "httpx[http2]", "httpx[socks]", "tornado (>=6.5,<7.0)"]
-callback-data = ["cachetools (>=5.3.3,<6.2.0)"]
-ext = ["aiolimiter (>=1.1,<1.3)", "apscheduler (>=3.10.4,<3.12.0)", "cachetools (>=5.3.3,<6.2.0)", "tornado (>=6.5,<7.0)"]
+all = ["aiolimiter (>=1.1,<1.3)", "apscheduler (>=3.10.4,<3.12.0)", "cachetools (>=7.0.0,<8.0.0)", "cffi (>=1.17.0rc1) ; python_version > \"3.12\"", "cryptography (>=39.0.1)", "httpx[http2]", "httpx[socks]", "tornado (>=6.5,<7.0)"]
+callback-data = ["cachetools (>=7.0.0,<8.0.0)"]
+ext = ["aiolimiter (>=1.1,<1.3)", "apscheduler (>=3.10.4,<3.12.0)", "cachetools (>=7.0.0,<8.0.0)", "tornado (>=6.5,<7.0)"]
 http2 = ["httpx[http2]"]
 job-queue = ["apscheduler (>=3.10.4,<3.12.0)"]
 passport = ["cffi (>=1.17.0rc1) ; python_version > \"3.12\"", "cryptography (>=39.0.1)"]
@@ -1188,6 +1193,18 @@ saml = ["python3-saml (>=1.5.0)"]
 shopify = ["ShopifyAPI"]
 
 [[package]]
+name = "socksio"
+version = "1.0.0"
+description = "Sans-I/O implementation of SOCKS4, SOCKS4A, and SOCKS5."
+optional = false
+python-versions = ">=3.6"
+groups = ["main"]
+files = [
+    {file = "socksio-1.0.0-py3-none-any.whl", hash = "sha256:95dc1f15f9b34e8d7b16f06d74b8ccf48f609af32ab33c608d08761c5dcbb1f3"},
+    {file = "socksio-1.0.0.tar.gz", hash = "sha256:f88beb3da5b5c38b9890469de67d0cb0f9d494b78b106ca1845f96c10b91c4ac"},
+]
+
+[[package]]
 name = "sqlparse"
 version = "0.5.3"
 description = "A non-validating SQL parser."
@@ -1274,4 +1291,4 @@ files = [
 [metadata]
 lock-version = "2.1"
 python-versions = ">=3.11,<4.0"
-content-hash = "494de152839ef2fca9c26f933a3d349387948f6afc78f526401724726eab0107"
+content-hash = "1ec5935d773cee85809cd41e2ca2af1cec956f80d621f0eb701fe90ecd1d6632"
