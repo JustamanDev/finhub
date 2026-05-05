@@ -26,3 +26,5 @@ __pycache__/
 *.bak
 
 
+.DS_Store
+**/.DS_Store
