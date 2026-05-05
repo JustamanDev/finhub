@@ -80,6 +80,7 @@ DB_PORT=5432
 
 ALLOWED_HOSTS=localhost,127.0.0.1
 TELEGRAM_BOT_TOKEN=your-telegram-bot-token
+TELEGRAM_PROXY_URL=
 TELEGRAM_CONNECT_TIMEOUT=10
 TELEGRAM_READ_TIMEOUT=30
 TELEGRAM_WRITE_TIMEOUT=30
@@ -132,6 +133,7 @@ DB_PORT=5432
 ALLOWED_HOSTS=localhost,127.0.0.1
 TELEGRAM_BOT_TOKEN=your-telegram-bot-token
 REDIS_URL=redis://redis:6379/1
+TELEGRAM_PROXY_URL=
 TELEGRAM_CONNECT_TIMEOUT=10
 TELEGRAM_READ_TIMEOUT=30
 TELEGRAM_WRITE_TIMEOUT=30
@@ -184,6 +186,7 @@ docker compose logs bot --tail=100
 - `DB_NAME`, `DB_USER`, `DB_PASSWORD`, `DB_HOST`, `DB_PORT` — параметры PostgreSQL.
 - `ALLOWED_HOSTS` — список хостов, с которых разрешён доступ.
 - `TELEGRAM_BOT_TOKEN` — токен Telegram‑бота.
+- `TELEGRAM_PROXY_URL` — URL прокси для Telegram API (опционально), например `socks5://user:password@host:1080`.
 - `REDIS_URL` — URL Redis для кэша/limiting (особенно в продакшене).
 - `TELEGRAM_CONNECT_TIMEOUT` — timeout на установку TCP‑соединения к Telegram API.
 - `TELEGRAM_READ_TIMEOUT` / `TELEGRAM_WRITE_TIMEOUT` / `TELEGRAM_POOL_TIMEOUT` — сетевые timeout'ы клиента Telegram.

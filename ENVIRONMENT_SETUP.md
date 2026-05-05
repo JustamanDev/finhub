@@ -59,6 +59,7 @@ TELEGRAM_ADMIN_CHAT_IDS=
 
 # Telegram API network resilience
 # Increase these values if you see frequent TimedOut/NetworkError in bot logs.
+TELEGRAM_PROXY_URL=
 TELEGRAM_CONNECT_TIMEOUT=10
 TELEGRAM_READ_TIMEOUT=30
 TELEGRAM_WRITE_TIMEOUT=30
@@ -74,6 +75,7 @@ TELEGRAM_POLLING_TIMEOUT=30
 
 ### Переменные
 
+- `TELEGRAM_PROXY_URL` — URL прокси для Telegram API (опционально), пример: `socks5://user:password@host:1080`.
 - `TELEGRAM_CONNECT_TIMEOUT` — timeout на установку TCP-соединения.
 - `TELEGRAM_READ_TIMEOUT` — timeout чтения для обычных API вызовов.
 - `TELEGRAM_WRITE_TIMEOUT` — timeout отправки запроса.
