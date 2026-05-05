@@ -56,7 +56,50 @@ SENTRY_DSN=
 # Comma-separated chat IDs that will receive bot error alerts.
 # Example: TELEGRAM_ADMIN_CHAT_IDS=123456789,987654321
 TELEGRAM_ADMIN_CHAT_IDS=
+
+# Telegram API network resilience
+# Increase these values if you see frequent TimedOut/NetworkError in bot logs.
+TELEGRAM_CONNECT_TIMEOUT=10
+TELEGRAM_READ_TIMEOUT=30
+TELEGRAM_WRITE_TIMEOUT=30
+TELEGRAM_POOL_TIMEOUT=10
+TELEGRAM_GET_UPDATES_READ_TIMEOUT=45
+TELEGRAM_POLLING_TIMEOUT=30
 ```
+
+## 🤖 Telegram Bot: timeouts и retry
+
+Бот запускается с явными timeout-настройками `HTTPXRequest` и retry (с backoff)
+для временных сетевых ошибок Telegram API.
+
+### Переменные
+
+- `TELEGRAM_CONNECT_TIMEOUT` — timeout на установку TCP-соединения.
+- `TELEGRAM_READ_TIMEOUT` — timeout чтения для обычных API вызовов.
+- `TELEGRAM_WRITE_TIMEOUT` — timeout отправки запроса.
+- `TELEGRAM_POOL_TIMEOUT` — timeout ожидания соединения из пула.
+- `TELEGRAM_GET_UPDATES_READ_TIMEOUT` — отдельный read timeout для long polling (`getUpdates`).
+- `TELEGRAM_POLLING_TIMEOUT` — timeout polling цикла (`start_polling`).
+
+### Рекомендуемые стартовые значения
+
+Для стабильной сети:
+
+- `TELEGRAM_CONNECT_TIMEOUT=10`
+- `TELEGRAM_READ_TIMEOUT=30`
+- `TELEGRAM_WRITE_TIMEOUT=30`
+- `TELEGRAM_POOL_TIMEOUT=10`
+- `TELEGRAM_GET_UPDATES_READ_TIMEOUT=45`
+- `TELEGRAM_POLLING_TIMEOUT=30`
+
+Для нестабильной сети/VPS с плавающей доступностью:
+
+- `TELEGRAM_CONNECT_TIMEOUT=15`
+- `TELEGRAM_READ_TIMEOUT=40`
+- `TELEGRAM_WRITE_TIMEOUT=40`
+- `TELEGRAM_POOL_TIMEOUT=15`
+- `TELEGRAM_GET_UPDATES_READ_TIMEOUT=60`
+- `TELEGRAM_POLLING_TIMEOUT=40`
 
 ## 🔄 Переключение между окружениями
 

@@ -20,6 +20,7 @@ from telegram_bot.models import (
 )
 from telegram_bot.utils.text_parser import TextCommandParser
 from telegram_bot.utils.admin_alerts import notify_admins_about_exception
+from telegram_bot.utils.telegram_resilience import retry_telegram_call
 from categories.default_categories import ensure_default_categories_async
 
 logger = logging.getLogger(__name__)
@@ -119,7 +120,7 @@ class BaseHandler:
         Returns:
             Состояние пользователя
         """
-        state, created = await UserState.objects.aget_or_create(
+        state, _ = await UserState.objects.aget_or_create(
             telegram_user=telegram_user
         )
         return state
@@ -192,7 +193,10 @@ class BaseHandler:
             pass
         
         if update.effective_chat:
-            await context.bot.send_message(
-                chat_id=update.effective_chat.id,
-                text="😔 Произошла ошибка. Попробуйте еще раз.",
-            ) 
+            await retry_telegram_call(
+                lambda: context.bot.send_message(
+                    chat_id=update.effective_chat.id,
+                    text="😔 Произошла ошибка. Попробуйте еще раз.",
+                ),
+                operation_name="send_error_message_to_user",
+            )

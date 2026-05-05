@@ -80,6 +80,12 @@ DB_PORT=5432
 
 ALLOWED_HOSTS=localhost,127.0.0.1
 TELEGRAM_BOT_TOKEN=your-telegram-bot-token
+TELEGRAM_CONNECT_TIMEOUT=10
+TELEGRAM_READ_TIMEOUT=30
+TELEGRAM_WRITE_TIMEOUT=30
+TELEGRAM_POOL_TIMEOUT=10
+TELEGRAM_GET_UPDATES_READ_TIMEOUT=45
+TELEGRAM_POLLING_TIMEOUT=30
 ```
 
 Применить миграции и запустить сервер разработки:
@@ -126,6 +132,12 @@ DB_PORT=5432
 ALLOWED_HOSTS=localhost,127.0.0.1
 TELEGRAM_BOT_TOKEN=your-telegram-bot-token
 REDIS_URL=redis://redis:6379/1
+TELEGRAM_CONNECT_TIMEOUT=10
+TELEGRAM_READ_TIMEOUT=30
+TELEGRAM_WRITE_TIMEOUT=30
+TELEGRAM_POOL_TIMEOUT=10
+TELEGRAM_GET_UPDATES_READ_TIMEOUT=45
+TELEGRAM_POLLING_TIMEOUT=30
 ```
 
 ### 2. Собрать и запустить контейнеры
@@ -173,6 +185,26 @@ docker compose logs bot --tail=100
 - `ALLOWED_HOSTS` — список хостов, с которых разрешён доступ.
 - `TELEGRAM_BOT_TOKEN` — токен Telegram‑бота.
 - `REDIS_URL` — URL Redis для кэша/limiting (особенно в продакшене).
+- `TELEGRAM_CONNECT_TIMEOUT` — timeout на установку TCP‑соединения к Telegram API.
+- `TELEGRAM_READ_TIMEOUT` / `TELEGRAM_WRITE_TIMEOUT` / `TELEGRAM_POOL_TIMEOUT` — сетевые timeout'ы клиента Telegram.
+- `TELEGRAM_GET_UPDATES_READ_TIMEOUT` — read timeout для long polling (`getUpdates`).
+- `TELEGRAM_POLLING_TIMEOUT` — timeout параметр polling цикла бота.
+
+### Устойчивость Telegram-бота к сети
+
+В `run_bot` включены:
+
+- Явные `HTTPXRequest` timeout'ы для API-вызовов и `getUpdates`.
+- Retry с backoff для временных сетевых ошибок (`TimedOut`, `NetworkError`) в критичных отправках:
+  - регистрация команд бота,
+  - отправка алертов админам,
+  - отправка сообщения пользователю из error handler.
+
+Если на хосте нестабильная сеть, начните с увеличения:
+
+- `TELEGRAM_CONNECT_TIMEOUT=15`
+- `TELEGRAM_READ_TIMEOUT=40`
+- `TELEGRAM_GET_UPDATES_READ_TIMEOUT=60`
 
 ---
 
