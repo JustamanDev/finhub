@@ -7,6 +7,8 @@ from typing import Iterable, Optional
 
 from django.core.cache import cache
 
+from telegram_bot.utils.telegram_resilience import retry_telegram_call
+
 
 def _parse_admin_chat_ids(value: str) -> list[int]:
     raw = (value or "").strip()
@@ -161,9 +163,12 @@ async def notify_admins_about_exception(
 
     for chat_id in admin_chat_ids:
         try:
-            await bot.send_message(
-                chat_id=chat_id,
-                text=message,
+            await retry_telegram_call(
+                lambda chat_id=chat_id: bot.send_message(
+                    chat_id=chat_id,
+                    text=message,
+                ),
+                operation_name=f"notify_admin_chat_{chat_id}",
             )
         except Exception:
             # Never fail the main flow due to alerting.

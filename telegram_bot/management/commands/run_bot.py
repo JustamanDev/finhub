@@ -4,6 +4,7 @@ import os
 from django.core.management.base import BaseCommand
 from django.conf import settings
 from telegram import BotCommand
+from telegram.request import HTTPXRequest
 from telegram.ext import (
     Application,
     MessageHandler,
@@ -16,8 +17,18 @@ from telegram_bot.handlers.text_handler import TextHandler
 from telegram_bot.handlers.callback_handler import CallbackHandler
 from telegram_bot.handlers.command_handler import CommandHandler as BotCommandHandler
 from telegram_bot.utils.admin_alerts import notify_admins_about_exception
+from telegram_bot.utils.telegram_resilience import retry_telegram_call
 
 logger = logging.getLogger(__name__)
+
+
+def _env_int(name: str, default: int) -> int:
+    raw = os.getenv(name, str(default)).strip()
+    try:
+        return int(raw)
+    except ValueError:
+        logger.warning("Invalid %s=%r, fallback to %s", name, raw, default)
+        return default
 
 
 class Command(BaseCommand):
@@ -78,7 +89,7 @@ class Command(BaseCommand):
         finally:
             try:
                 loop.close()
-            except:
+            except Exception:
                 pass
     
     async def _run_bot(self, token: str):
@@ -89,8 +100,28 @@ class Command(BaseCommand):
             token: Токен Telegram бота
         """
         try:
+            request = HTTPXRequest(
+                connect_timeout=_env_int("TELEGRAM_CONNECT_TIMEOUT", 10),
+                read_timeout=_env_int("TELEGRAM_READ_TIMEOUT", 30),
+                write_timeout=_env_int("TELEGRAM_WRITE_TIMEOUT", 30),
+                pool_timeout=_env_int("TELEGRAM_POOL_TIMEOUT", 10),
+            )
+
+            get_updates_request = HTTPXRequest(
+                connect_timeout=_env_int("TELEGRAM_CONNECT_TIMEOUT", 10),
+                read_timeout=_env_int("TELEGRAM_GET_UPDATES_READ_TIMEOUT", 45),
+                write_timeout=_env_int("TELEGRAM_WRITE_TIMEOUT", 30),
+                pool_timeout=_env_int("TELEGRAM_POOL_TIMEOUT", 10),
+            )
+
             # Создаем приложение
-            application = Application.builder().token(token).build()
+            application = (
+                Application.builder()
+                .token(token)
+                .request(request)
+                .get_updates_request(get_updates_request)
+                .build()
+            )
             
             # Создаем обработчики
             text_handler = TextHandler()
@@ -153,12 +184,15 @@ class Command(BaseCommand):
             application.add_error_handler(error_handler)
 
             # Регистрируем команды бота (для кнопки меню Telegram)
-            await application.bot.set_my_commands(
-                [
-                    BotCommand('start', 'Главное меню'),
-                    BotCommand('stats', 'Статистика за сегодня'),
-                    BotCommand('help', 'Справка по использованию'),
-                ]
+            await retry_telegram_call(
+                lambda: application.bot.set_my_commands(
+                    [
+                        BotCommand('start', 'Главное меню'),
+                        BotCommand('stats', 'Статистика за сегодня'),
+                        BotCommand('help', 'Справка по использованию'),
+                    ]
+                ),
+                operation_name="set_my_commands",
             )
             
             # Запускаем бота
@@ -172,7 +206,9 @@ class Command(BaseCommand):
             # Инициализируем и запускаем приложение
             await application.initialize()
             await application.start()
-            await application.updater.start_polling()
+            await application.updater.start_polling(
+                timeout=_env_int("TELEGRAM_POLLING_TIMEOUT", 30),
+            )
             
             # Ждем остановки
             try:
