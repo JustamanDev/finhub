@@ -1,4 +1,12 @@
-# 🚀 PRODUCTION CHECKLIST - FinHub
+# PRODUCTION_CHECKLIST.md (redirect)
+
+> **Checklist:** [docs/human/deploy.md](docs/human/deploy.md) — раздел «Checklist перед production».
+
+> Redis/ratelimit уже в production settings. Ниже — оригинал (частично устарел).
+
+---
+
+
 
 ## ⚠️ КРИТИЧНО: ВРЕМЕННЫЕ РЕШЕНИЯ ДЛЯ УСТРАНЕНИЯ
 
