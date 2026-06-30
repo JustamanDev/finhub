@@ -237,3 +237,79 @@ if __name__ == '__main__':
         logger.info("🎉 Все тесты завершены!")
     
     asyncio.run(run_tests())
+
+
+from decimal import Decimal
+from unittest.mock import patch
+
+from telegram_bot.voice.intents import (
+    CONFIDENCE_AUTO_SAVE,
+    ParsedVoiceCommand,
+    VoiceIntentType,
+)
+from telegram_bot.voice.interpreter import VoiceInterpreter
+
+
+class ParsedVoiceCommandTests(TestCase):
+    def test_auto_save_when_confident_and_category(self):
+        command = ParsedVoiceCommand(
+            intent=VoiceIntentType.CREATE_TRANSACTION,
+            success=True,
+            confidence=CONFIDENCE_AUTO_SAVE,
+            raw_transcript='300 продукты',
+            category=object(),
+        )
+        self.assertFalse(command.needs_confirmation())
+        self.assertFalse(command.should_reject())
+
+    def test_confirm_when_low_confidence(self):
+        command = ParsedVoiceCommand(
+            intent=VoiceIntentType.CREATE_TRANSACTION,
+            success=True,
+            confidence=0.7,
+            raw_transcript='что-то',
+            amount=Decimal('300'),
+            category_name='Продукты',
+        )
+        self.assertTrue(command.needs_confirmation())
+
+    def test_reject_when_too_low_confidence(self):
+        command = ParsedVoiceCommand(
+            intent=VoiceIntentType.CREATE_TRANSACTION,
+            success=True,
+            confidence=0.3,
+            raw_transcript='неясно',
+        )
+        self.assertTrue(command.should_reject())
+
+
+class VoiceInterpreterRegexTests(TestCase):
+    def setUp(self):
+        self.user = User.objects.create_user(
+            username='voice_test',
+            password='test',
+        )
+        self.category = Category.objects.create(
+            user=self.user,
+            name='Продукты',
+            type='expense',
+            color='#000000',
+            icon='🛒',
+        )
+
+    def test_fast_path_amount_category(self):
+        interpreter = VoiceInterpreter(self.user)
+        command = interpreter.interpret('500 продукты')
+        self.assertEqual(command.intent, VoiceIntentType.CREATE_TRANSACTION)
+        self.assertEqual(command.confidence, 1.0)
+        self.assertEqual(command.amount, Decimal('500'))
+        self.assertEqual(command.category.id, self.category.id)
+
+    @patch('telegram_bot.voice.interpreter.openai_api_key', return_value='')
+    def test_llm_skipped_without_api_key_after_regex_fail(self, _mock_key):
+        interpreter = VoiceInterpreter(self.user)
+        command = interpreter.interpret(
+            'запиши расход триста рублей на продукты',
+        )
+        self.assertFalse(command.success)
+        self.assertIn('OPENAI_API_KEY', command.error or '')

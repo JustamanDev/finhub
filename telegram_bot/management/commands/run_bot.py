@@ -14,6 +14,7 @@ from telegram.ext import (
 )
 
 from telegram_bot.handlers.text_handler import TextHandler
+from telegram_bot.handlers.voice_handler import VoiceHandler
 from telegram_bot.handlers.callback_handler import CallbackHandler
 from telegram_bot.handlers.command_handler import CommandHandler as BotCommandHandler
 from telegram_bot.utils.admin_alerts import notify_admins_about_exception
@@ -160,6 +161,7 @@ class Command(BaseCommand):
             
             # Создаем обработчики
             text_handler = TextHandler()
+            voice_handler = VoiceHandler()
             callback_handler = CallbackHandler()
             command_handler = BotCommandHandler()
             
@@ -188,6 +190,13 @@ class Command(BaseCommand):
                 MessageHandler(
                     filters.TEXT & ~filters.COMMAND,
                     text_handler.handle_text_message,
+                )
+            )
+
+            application.add_handler(
+                MessageHandler(
+                    filters.VOICE | filters.AUDIO,
+                    voice_handler.handle_voice_message,
                 )
             )
             
