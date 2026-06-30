@@ -7,6 +7,7 @@ from asgiref.sync import sync_to_async
 from .base import BaseHandler
 from telegram_bot.keyboards.categories import CategoryKeyboard
 from telegram_bot.keyboards.actions import ActionKeyboard
+from telegram_bot.services.command_executor import CommandExecutor
 from telegram_bot.services.transaction_service import TransactionService
 from telegram_bot.services.category_management_service import CategoryManagementService
 from telegram_bot.services.goal_service import GoalService
@@ -19,6 +20,10 @@ logger = logging.getLogger(__name__)
 
 class TextHandler(BaseHandler):
     """Обработчик текстовых сообщений"""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self._command_executor = CommandExecutor()
 
     @staticmethod
     def _parse_money(text: str) -> Decimal:
@@ -250,8 +255,13 @@ class TextHandler(BaseHandler):
             context: Контекст бота
         """
         try:
+            message_text = context.user_data.pop(
+                '_voice_text_override',
+                None,
+            ) or update.message.text
+
             # Логируем входящее сообщение для отладки
-            logger.info(f"Получено текстовое сообщение: {update.message.text}")
+            logger.info(f"Получено текстовое сообщение: {message_text}")
             
             # Получаем пользователя
             telegram_user = await self.get_or_create_telegram_user(
@@ -268,7 +278,7 @@ class TextHandler(BaseHandler):
                     context,
                     telegram_user,
                     renaming_category_id,
-                    update.message.text,
+                    message_text,
                 )
                 return
 
@@ -292,7 +302,7 @@ class TextHandler(BaseHandler):
             # Сначала проверим, не находится ли пользователь в режиме редактирования суммы транзакции
             if context.user_data.get('editing_transaction_amount'):
                 transaction_id = context.user_data.get('editing_transaction_amount')
-                text = update.message.text.strip().replace(' ', '').replace(',', '.')
+                text = message_text.strip().replace(' ', '').replace(',', '.')
                 try:
                     new_amount = Decimal(text)
                     if new_amount <= 0:
@@ -329,7 +339,7 @@ class TextHandler(BaseHandler):
             # Сначала проверим, не находится ли пользователь в режиме редактирования даты транзакции
             if context.user_data.get('editing_transaction_date'):
                 transaction_id = context.user_data.get('editing_transaction_date')
-                text = update.message.text.strip()
+                text = message_text.strip()
                 try:
                     # Пытаемся распарсить дату в формате ДД.ММ.ГГГГ или YYYY-MM-DD
                     try:
@@ -367,7 +377,7 @@ class TextHandler(BaseHandler):
             # Проверяем, ожидается ли ввод комментария для редактирования транзакции
             if context.user_data.get('editing_transaction_comment'):
                 transaction_id = context.user_data.get('editing_transaction_comment')
-                comment_text = update.message.text.strip()
+                comment_text = message_text.strip()
                 user = await sync_to_async(lambda: telegram_user.user)()
                 transaction_service = TransactionService(user)
                 updated = await transaction_service.update_transaction_description(transaction_id, comment_text)
@@ -397,7 +407,7 @@ class TextHandler(BaseHandler):
                     update,
                     context,
                     telegram_user,
-                    update.message.text,
+                    message_text,
                 )
                 return
             
@@ -407,7 +417,7 @@ class TextHandler(BaseHandler):
                     update,
                     context,
                     telegram_user,
-                    update.message.text,
+                    message_text,
                 )
                 return
             
@@ -417,7 +427,7 @@ class TextHandler(BaseHandler):
                     update,
                     context,
                     telegram_user,
-                    update.message.text,
+                    message_text,
                 )
                 return
             
@@ -425,13 +435,13 @@ class TextHandler(BaseHandler):
             await self.log_message(
                 telegram_user,
                 'incoming',
-                update.message.text,
+                message_text,
             )
             
             # Парсим команду
             user = await sync_to_async(lambda: telegram_user.user)()
             parser = await sync_to_async(self.get_parser)(user)
-            parsed_command = await sync_to_async(parser.parse)(update.message.text)
+            parsed_command = await sync_to_async(parser.parse)(message_text)
             
             if not parsed_command['success']:
                 await self._send_error_message(
@@ -485,45 +495,12 @@ class TextHandler(BaseHandler):
         parsed_command: dict,
     ) -> None:
         """Обрабатывает команду с суммой и категорией"""
-        user = await sync_to_async(lambda: telegram_user.user)()
-        transaction_service = TransactionService(user)
-        
-        if parsed_command['category']:
-            # Категория найдена - создаем транзакцию
-            try:
-                transaction = await transaction_service.create_transaction(
-                    amount=parsed_command['amount'],
-                    category=parsed_command['category'],
-                    transaction_type=parsed_command['transaction_type'],
-                )
-                
-                # Обновляем состояние пользователя
-                user_state = await self.get_user_state(telegram_user)
-                user_state.last_transaction_type = parsed_command['transaction_type']
-                await user_state.asave()
-                
-                await self._send_transaction_created_message(
-                    update,
-                    context,
-                    transaction,
-                )
-            except Exception as e:
-                logger.error(f"❌ Ошибка создания транзакции: {e}")
-                await self._send_error_message(
-                    update,
-                    context,
-                    f"Ошибка создания транзакции: {e}",
-                )
-        else:
-            # Категория не найдена - предлагаем выбрать
-            await self._send_category_selection(
-                update,
-                context,
-                telegram_user,
-                parsed_command['amount'],
-                parsed_command['transaction_type'],
-                f"Категория '{parsed_command['category_name']}' не найдена.",
-            )
+        await self._command_executor.execute_create_transaction(
+            update,
+            context,
+            telegram_user,
+            parsed_command,
+        )
     
     async def _handle_amount_only(
         self,
@@ -533,24 +510,11 @@ class TextHandler(BaseHandler):
         parsed_command: dict,
     ) -> None:
         """Обрабатывает команду только с суммой"""
-        # Сохраняем сумму в состоянии
-        user_state = await self.get_user_state(telegram_user)
-        user_state.current_amount = parsed_command['amount']
-        user_state.awaiting_category = True
-        await user_state.asave()
-        
-        # Определяем тип транзакции
-        if parsed_command.get('transaction_type'):
-            transaction_type = parsed_command['transaction_type']
-        else:
-            transaction_type = user_state.last_transaction_type
-        
-        await self._send_category_selection(
+        await self._command_executor.execute_create_transaction(
             update,
             context,
             telegram_user,
-            parsed_command['amount'],
-            transaction_type,
+            parsed_command,
         )
     
     async def _send_category_selection(
@@ -563,21 +527,13 @@ class TextHandler(BaseHandler):
         prefix_message: str = "",
     ) -> None:
         """Отправляет сообщение с выбором категории"""
-        keyboard_generator = CategoryKeyboard(telegram_user)
-        keyboard = await keyboard_generator.get_frequent_categories_keyboard(
-            transaction_type
-        )
-        
-        transaction_emoji = "💸" if transaction_type == "expense" else "💰"
-        type_name = "расход" if transaction_type == "expense" else "доход"
-        
-        message = f"{prefix_message}\n" if prefix_message else ""
-        message += f"{transaction_emoji} {amount:,.0f}₽ - выбери категорию ({type_name}):"
-        
-        await context.bot.send_message(
-            chat_id=update.effective_chat.id,
-            text=message,
-            reply_markup=keyboard,
+        await self._command_executor.send_category_selection(
+            update,
+            context,
+            telegram_user,
+            amount,
+            transaction_type,
+            prefix_message,
         )
     
     async def _send_transaction_created_message(
@@ -587,22 +543,10 @@ class TextHandler(BaseHandler):
         transaction,
     ) -> None:
         """Отправляет сообщение о созданной транзакции"""
-        transaction_emoji = "💸" if transaction.category.type == "expense" else "💰"
-        
-        message = (
-            f"✅ {abs(transaction.amount):,.0f}₽ → "
-            f"{transaction.category.icon} {transaction.category.name}\n"
-            f"Добавлено {transaction.date.strftime('%d.%m.%Y')}"
-        )
-        
-        keyboard = ActionKeyboard.get_transaction_actions_keyboard(
-            transaction.id
-        )
-        
-        await context.bot.send_message(
-            chat_id=update.effective_chat.id,
-            text=message,
-            reply_markup=keyboard,
+        await self._command_executor.send_transaction_created(
+            update,
+            context,
+            transaction,
         )
     
     async def _send_error_message(
@@ -612,10 +556,7 @@ class TextHandler(BaseHandler):
         error_text: str,
     ) -> None:
         """Отправляет сообщение об ошибке"""
-        await context.bot.send_message(
-            chat_id=update.effective_chat.id,
-            text=f"❌ {error_text}",
-        )
+        await self._command_executor.send_error(update, context, error_text)
     
     async def _send_help_message(
         self,
@@ -629,6 +570,8 @@ class TextHandler(BaseHandler):
             "• 500 кофе - добавить расход\n"
             "• +1000 зарплата - добавить доход\n"
             "• 500 - выбрать категорию\n\n"
+            "🎤 Голосом (если включено):\n"
+            "• «Запиши расход 300 рублей на продукты»\n\n"
             "🔧 Команды:\n"
             "• /start - главное меню\n"
             "• /stats - статистика\n"

@@ -16,6 +16,7 @@ from asgiref.sync import sync_to_async
 from .base import BaseHandler
 from telegram_bot.keyboards.categories import CategoryKeyboard
 from telegram_bot.keyboards.actions import ActionKeyboard
+from telegram_bot.services.command_executor import CommandExecutor
 from telegram_bot.services.transaction_service import (
     TransactionService,
     SmartSuggestionsService,
@@ -28,6 +29,10 @@ logger = logging.getLogger(__name__)
 
 class CallbackHandler(BaseHandler):
     """Обработчик callback запросов от inline клавиатур"""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self._command_executor = CommandExecutor()
     
     async def handle_callback_query(
         self,
@@ -45,7 +50,16 @@ class CallbackHandler(BaseHandler):
             )
             
             # Обрабатываем callback по типу
-            if query.data == 'add_expense':
+            if query.data == 'voice_confirm_yes':
+                await self._handle_voice_confirm(
+                    update,
+                    query,
+                    context,
+                    telegram_user,
+                )
+            elif query.data == 'voice_cancel':
+                await self._handle_voice_cancel(query, context)
+            elif query.data == 'add_expense':
                 await self._handle_add_expense(
                     query,
                     context,
@@ -1661,4 +1675,29 @@ class CallbackHandler(BaseHandler):
             context,
             telegram_user,
             category_id,
-        ) 
+        )
+
+    async def _handle_voice_confirm(
+        self,
+        update: Update,
+        query: CallbackQuery,
+        context: ContextTypes.DEFAULT_TYPE,
+        telegram_user,
+    ) -> None:
+        await query.answer()
+        await self._command_executor.execute_from_voice_pending(
+            update,
+            context,
+            telegram_user,
+        )
+
+    async def _handle_voice_cancel(
+        self,
+        query: CallbackQuery,
+        context: ContextTypes.DEFAULT_TYPE,
+    ) -> None:
+        from telegram_bot.services.command_executor import VOICE_PENDING_KEY
+
+        context.user_data.pop(VOICE_PENDING_KEY, None)
+        await query.answer('Отменено')
+        await query.edit_message_text('❌ Голосовая команда отменена.') 
