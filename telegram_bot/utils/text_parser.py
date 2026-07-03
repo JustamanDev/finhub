@@ -20,6 +20,12 @@ class TextCommandParser:
     AMOUNT_ONLY_PATTERN = r'^([+-]?\d+(?:[.,]\d+)?)$'
     ALIAS_PATTERN = r'^([а-я]\d+)$'
     CATEGORY_ONLY_PATTERN = r'^([а-яё\s]+)$'
+    NATURAL_VOICE_PATTERN = (
+        r'(?i)^(?:добавь|запиши|создай|потрать|расход)\s+'
+        r'(\d+(?:[.,]\d+)?)\s*'
+        r'(?:руб(?:лей|ля|ль)?\.?\s*)?'
+        r'(?:в\s+)?(?:категори(?:ю|и)\s+)?(.+?)\.?$'
+    )
     
     def __init__(self, user):
         self.user = user
@@ -56,6 +62,14 @@ class TextCommandParser:
                 return self._parse_amount_category(
                     amount_str,
                     category_name,
+                )
+
+            # 2b. Голосовые фразы: «добавь 500 рублей в категорию мобильный»
+            if match := re.match(self.NATURAL_VOICE_PATTERN, text):
+                amount_str, category_name = match.groups()
+                return self._parse_amount_category(
+                    amount_str,
+                    category_name.strip(),
                 )
                 
             # 3. Только сумма (500, +1000)

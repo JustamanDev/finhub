@@ -39,15 +39,22 @@ RESPONSE_SCHEMA = {
             'enum': list(INTENT_MAP.keys()),
         },
         'transaction_type': {
-            'type': 'string',
-            'enum': ['expense', 'income'],
+            'type': ['string', 'null'],
+            'enum': ['expense', 'income', None],
         },
         'amount': {'type': ['number', 'null']},
         'category_name': {'type': ['string', 'null']},
         'description': {'type': 'string'},
         'confidence': {'type': 'number'},
     },
-    'required': ['intent', 'confidence'],
+    'required': [
+        'intent',
+        'transaction_type',
+        'amount',
+        'category_name',
+        'description',
+        'confidence',
+    ],
     'additionalProperties': False,
 }
 
