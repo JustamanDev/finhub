@@ -16,6 +16,7 @@ Voice → Whisper → transcript → [regex fast path | LLM JSON] → CommandExe
 |------|------|
 | `telegram_bot/voice/transcription.py` | Whisper API, OGG→MP3, chunking, retry |
 | `telegram_bot/voice/audio_download.py` | Download from Telegram |
+| `telegram_bot/voice/openai_client.py` | OpenAI client + SOCKS/HTTP proxy |
 | `telegram_bot/voice/config.py` | Env flags |
 | `telegram_bot/voice/intents.py` | Intent enum + ParsedVoiceCommand |
 | `telegram_bot/voice/interpreter.py` | Regex + LLM structured extract |
@@ -43,7 +44,9 @@ Voice → Whisper → transcript → [regex fast path | LLM JSON] → CommandExe
 
 ## Env
 
-`VOICE_ENABLED`, `OPENAI_API_KEY`, `TRANSCRIPTION_MODEL`, `VOICE_LLM_MODEL`, `WHISPER_PROMPT`, `WHISPER_LANGUAGE`
+`VOICE_ENABLED`, `OPENAI_API_KEY`, `OPENAI_PROXY_URL`, `TRANSCRIPTION_MODEL`, `VOICE_LLM_MODEL`, `WHISPER_PROMPT`, `WHISPER_LANGUAGE`
+
+`OPENAI_PROXY_URL` — если не задан, используется `TELEGRAM_PROXY_URL`. Для Whisper/LLM нужен proxy с **выходом в стране, где OpenAI доступен** (EU/US); московский SOCKS для Telegram может не подойти.
 
 ## Implementation checklist
 

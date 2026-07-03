@@ -9,11 +9,10 @@ from decimal import Decimal, InvalidOperation
 from pathlib import Path
 
 from django.contrib.auth.models import User
-from openai import OpenAI
-
 from categories.models import Category
 from telegram_bot.utils.text_parser import TextCommandParser
 from telegram_bot.voice.config import openai_api_key, voice_llm_model
+from telegram_bot.voice.openai_client import format_openai_error, get_openai_client
 from telegram_bot.voice.intents import (
     ParsedVoiceCommand,
     VoiceIntentType,
@@ -115,7 +114,7 @@ class VoiceInterpreter:
             )
 
         system_prompt = self._build_system_prompt()
-        client = OpenAI(api_key=api_key)
+        client = get_openai_client()
         model = voice_llm_model()
         last_error: Exception | None = None
 
@@ -154,7 +153,7 @@ class VoiceInterpreter:
             success=False,
             confidence=0.0,
             raw_transcript=text,
-            error=f'Не удалось разобрать команду: {last_error}',
+            error=f'Не удалось разобрать команду: {format_openai_error(last_error)}',
         )
 
     def _build_system_prompt(self) -> str:

@@ -313,3 +313,44 @@ class VoiceInterpreterRegexTests(TestCase):
         )
         self.assertFalse(command.success)
         self.assertIn('OPENAI_API_KEY', command.error or '')
+
+
+class OpenAIProxyConfigTests(TestCase):
+    @patch('telegram_bot.voice.config.config')
+    def test_openai_proxy_url_prefers_openai_var(self, mock_config):
+        def side_effect(key, default='', cast=None):
+            values = {
+                'OPENAI_PROXY_URL': 'socks5h://eu-proxy:1080',
+                'TELEGRAM_PROXY_URL': 'socks5://ru-proxy:1080',
+            }
+            return values.get(key, default)
+
+        mock_config.side_effect = side_effect
+        from telegram_bot.voice.config import openai_proxy_url
+
+        self.assertEqual(openai_proxy_url(), 'socks5h://eu-proxy:1080')
+
+    @patch('telegram_bot.voice.config.config')
+    def test_openai_proxy_url_falls_back_to_telegram(self, mock_config):
+        def side_effect(key, default='', cast=None):
+            values = {
+                'OPENAI_PROXY_URL': '',
+                'TELEGRAM_PROXY_URL': 'socks5://ru-proxy:1080',
+            }
+            return values.get(key, default)
+
+        mock_config.side_effect = side_effect
+        from telegram_bot.voice.config import openai_proxy_url
+
+        self.assertEqual(openai_proxy_url(), 'socks5://ru-proxy:1080')
+
+    def test_format_openai_region_error(self):
+        from telegram_bot.voice.openai_client import format_openai_error
+
+        exc = Exception(
+            "Error code: 403 - {'error': {'code': "
+            "'unsupported_country_region_territory'}}",
+        )
+        message = format_openai_error(exc)
+        self.assertIn('OPENAI_PROXY_URL', message)
+        self.assertIn('регион', message.lower())

@@ -10,15 +10,14 @@ from collections.abc import Callable
 from contextlib import contextmanager
 from pathlib import Path
 
-from openai import OpenAI
 from pydub import AudioSegment
 
 from telegram_bot.voice.config import (
-    openai_api_key,
     transcription_model,
     whisper_language,
     whisper_prompt,
 )
+from telegram_bot.voice.openai_client import format_openai_error, get_openai_client
 
 logger = logging.getLogger(__name__)
 
@@ -39,13 +38,13 @@ class TranscriptionError(Exception):
     """Ошибка транскрибации или конфигурации."""
 
 
-def get_client() -> OpenAI:
-    api_key = openai_api_key()
-    if not api_key:
+def get_client():
+    try:
+        return get_openai_client()
+    except ValueError as exc:
         raise TranscriptionError(
             'Задайте OPENAI_API_KEY в .env для голосового ввода.',
-        )
-    return OpenAI(api_key=api_key)
+        ) from exc
 
 
 def _notify(progress: ProgressCallback | None, message: str) -> None:
@@ -121,7 +120,7 @@ def _transcribe_one(
                 time.sleep(attempt)
 
     raise TranscriptionError(
-        f'Не удалось распознать аудио: {last_error}',
+        f'Не удалось распознать аудио: {format_openai_error(last_error)}',
     ) from last_error
 
 
