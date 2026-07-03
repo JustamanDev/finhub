@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import logging
+import re
 import time
 from decimal import Decimal, InvalidOperation
 from pathlib import Path
@@ -58,6 +59,28 @@ RESPONSE_SCHEMA = {
     'additionalProperties': False,
 }
 
+NATURAL_VOICE_RE = re.compile(
+    r'(?i)^(?:добавь|запиши|создай|потрать|расход)\s+'
+    r'(\d+(?:[.,]\d+)?)\s*'
+    r'(?:руб(?:лей|ля|ль)?\.?\s*)?'
+    r'(?:в\s+)?(?:категори(?:ю|и)\s+)?(.+?)[.\s]*$'
+)
+
+
+def _normalize_transcript(text: str) -> str:
+    cleaned = text.strip().replace('\u00a0', ' ')
+    cleaned = re.sub(r'\s+', ' ', cleaned)
+    return cleaned
+
+
+def _compact_natural_phrase(text: str) -> str | None:
+    """«Добавь 500 рублей в категорию мобильный» → «500 мобильный»."""
+    match = NATURAL_VOICE_RE.match(text)
+    if not match:
+        return None
+    amount, category = match.groups()
+    return f'{amount} {category.strip().strip(".")}'
+
 
 class VoiceInterpreter:
     def __init__(self, user: User):
@@ -65,7 +88,7 @@ class VoiceInterpreter:
         self._parser = TextCommandParser(user)
 
     def interpret(self, transcript: str) -> ParsedVoiceCommand:
-        text = transcript.strip()
+        text = _normalize_transcript(transcript)
         if not text:
             return ParsedVoiceCommand(
                 intent=VoiceIntentType.UNKNOWN,
@@ -79,34 +102,38 @@ class VoiceInterpreter:
         if fast:
             return fast
 
+        logger.info('Voice LLM fallback for transcript: %r', text)
         return self._interpret_with_llm(text)
 
     def _try_regex_fast_path(self, text: str) -> ParsedVoiceCommand | None:
-        parsed = self._parser.parse(text)
-        if not parsed.get('success'):
-            return None
-        if parsed['type'] == 'amount_category':
-            return ParsedVoiceCommand(
-                intent=VoiceIntentType.CREATE_TRANSACTION,
-                success=True,
-                confidence=1.0,
-                raw_transcript=text,
-                transaction_type=parsed['transaction_type'],
-                amount=parsed['amount'],
-                category_name=parsed.get('category_name'),
-                category=parsed.get('category'),
-                command_type='amount_category',
-            )
-        if parsed['type'] == 'amount_only':
-            return ParsedVoiceCommand(
-                intent=VoiceIntentType.CREATE_TRANSACTION,
-                success=True,
-                confidence=1.0,
-                raw_transcript=text,
-                transaction_type=parsed['transaction_type'],
-                amount=parsed['amount'],
-                command_type='amount_only',
-            )
+        for candidate in (text, _compact_natural_phrase(text)):
+            if not candidate:
+                continue
+            parsed = self._parser.parse(candidate)
+            if not parsed.get('success'):
+                continue
+            if parsed['type'] == 'amount_category':
+                return ParsedVoiceCommand(
+                    intent=VoiceIntentType.CREATE_TRANSACTION,
+                    success=True,
+                    confidence=1.0,
+                    raw_transcript=text,
+                    transaction_type=parsed['transaction_type'],
+                    amount=parsed['amount'],
+                    category_name=parsed.get('category_name'),
+                    category=parsed.get('category'),
+                    command_type='amount_category',
+                )
+            if parsed['type'] == 'amount_only':
+                return ParsedVoiceCommand(
+                    intent=VoiceIntentType.CREATE_TRANSACTION,
+                    success=True,
+                    confidence=1.0,
+                    raw_transcript=text,
+                    transaction_type=parsed['transaction_type'],
+                    amount=parsed['amount'],
+                    command_type='amount_only',
+                )
         return None
 
     def _interpret_with_llm(self, text: str) -> ParsedVoiceCommand:
@@ -137,7 +164,7 @@ class VoiceInterpreter:
                         'type': 'json_schema',
                         'json_schema': {
                             'name': 'voice_command',
-                            'strict': True,
+                            'strict': False,
                             'schema': RESPONSE_SCHEMA,
                         },
                     },
