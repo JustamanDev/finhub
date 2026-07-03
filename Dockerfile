@@ -29,6 +29,7 @@ RUN pip install --upgrade pip && \
         "python-telegram-bot[socks]>=22.3,<23.0" \
         "django-redis>=5.4.0,<6.0.0" \
         "xlsxwriter>=3.2.0,<4.0.0" \
+        "httpx[socks]>=0.27,<1.0" \
         "openai>=1.0,<2.0" \
         "pydub>=0.25,<0.26" \
         "gunicorn>=22.0.0,<23.0.0"

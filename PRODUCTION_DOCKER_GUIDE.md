@@ -101,6 +101,29 @@ volumes:
 
 > **Идея:** все сервисы читают один и тот же `.env`, а значения `DB_*` переиспользуются
 > и Django, и Postgres‑контейнером.
+>
+> **Важно для bot:** в `finhub.yml` у сервиса `bot` обязательно `env_file: /srv/www/finhub/.env`.
+> Флаг `docker compose --env-file …` в CLI только подставляет переменные в compose-файл,
+> **не** прокидывает их в контейнер автоматически. После смены `.env` или pull с proxy-кодом:
+> `up -d --build --no-cache bot`.
+
+### Голосовой ввод (OpenAI через SOCKS)
+
+На RU VPS в `.env`:
+
+```env
+VOICE_ENABLED=True
+OPENAI_API_KEY=sk-...
+OPENAI_PROXY_URL=socks5h://user:pass@NL_HOST:1080
+TELEGRAM_PROXY_URL=socks5://user:pass@NL_HOST:1080
+```
+
+Проверка из контейнера:
+
+```bash
+docker compose --env-file /srv/www/finhub/.env -f finhub.yml exec bot \
+  python -c "from telegram_bot.voice.config import openai_proxy_url; print(openai_proxy_url())"
+```
 
 ---
 
