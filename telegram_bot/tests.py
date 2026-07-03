@@ -322,6 +322,14 @@ class VoiceInterpreterRegexTests(TestCase):
         self.assertEqual(command.amount, Decimal('500'))
         self.assertEqual(command.category.id, mobile.id)
 
+    def test_compact_natural_phrase(self):
+        from telegram_bot.voice.interpreter import _compact_natural_phrase
+
+        self.assertEqual(
+            _compact_natural_phrase('Добавь 500 рублей в категорию мобильный.'),
+            '500 мобильный',
+        )
+
     @patch('telegram_bot.voice.interpreter.openai_api_key', return_value='')
     def test_llm_skipped_without_api_key_after_regex_fail(self, _mock_key):
         interpreter = VoiceInterpreter(self.user)
