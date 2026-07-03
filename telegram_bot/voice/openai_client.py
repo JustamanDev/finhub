@@ -21,6 +21,10 @@ def get_openai_client() -> OpenAI:
         raise ValueError('OPENAI_API_KEY is not set')
 
     proxy = openai_proxy_url()
+    if not proxy:
+        logger.warning(
+            'OPENAI_PROXY_URL is not set — OpenAI requests go direct from VPS',
+        )
     http_client = httpx.Client(
         proxy=proxy,
         timeout=DEFAULT_TIMEOUT,

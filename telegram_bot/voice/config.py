@@ -1,5 +1,7 @@
 """Настройки голосового ввода из переменных окружения."""
 
+import os
+
 from decouple import config
 
 
@@ -13,10 +15,15 @@ def openai_api_key() -> str:
 
 def openai_proxy_url() -> str | None:
     """Proxy for OpenAI API (Whisper + LLM). Falls back to TELEGRAM_PROXY_URL."""
-    raw = config('OPENAI_PROXY_URL', default='').strip()
+    # os.environ first: надёжнее в Docker, чем только decouple/.env в образе
+    raw = os.getenv('OPENAI_PROXY_URL', '').strip()
+    if not raw:
+        raw = config('OPENAI_PROXY_URL', default='').strip()
     if raw:
         return raw
-    raw = config('TELEGRAM_PROXY_URL', default='').strip()
+    raw = os.getenv('TELEGRAM_PROXY_URL', '').strip()
+    if not raw:
+        raw = config('TELEGRAM_PROXY_URL', default='').strip()
     return raw or None
 
 
