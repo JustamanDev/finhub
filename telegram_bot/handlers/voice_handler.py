@@ -98,16 +98,6 @@ class VoiceHandler(BaseHandler):
 
             await status_message.edit_text(f'🎤 Распознано: «{clean_transcript}»')
 
-            if context.user_data.get(VOICE_PENDING_KEY):
-                await context.bot.send_message(
-                    chat_id=update.effective_chat.id,
-                    text=(
-                        'Есть неподтверждённая голосовая команда. '
-                        'Нажмите ✅ Да или ❌ Отмена в сообщении выше.'
-                    ),
-                )
-                return
-
             if _is_interactive_state(context):
                 context.user_data['_voice_text_override'] = clean_transcript
                 await self._text_handler.handle_text_message(update, context)
@@ -119,6 +109,16 @@ class VoiceHandler(BaseHandler):
             ):
                 context.user_data['_voice_text_override'] = clean_transcript
                 await self._text_handler.handle_text_message(update, context)
+                return
+
+            if context.user_data.get(VOICE_PENDING_KEY):
+                await context.bot.send_message(
+                    chat_id=update.effective_chat.id,
+                    text=(
+                        'Есть неподтверждённая голосовая команда. '
+                        'Нажмите ✅ Да или ❌ Отмена в сообщении выше.'
+                    ),
+                )
                 return
 
             user = await sync_to_async(lambda: telegram_user.user)()
