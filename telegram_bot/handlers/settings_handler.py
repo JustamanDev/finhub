@@ -1144,37 +1144,15 @@ class SettingsHandler(BaseHandler):
                 from telegram import InlineKeyboardMarkup
                 reply_markup = InlineKeyboardMarkup(keyboard)
         
-        try:
-            if hasattr(update, 'callback_query'):
-                # Это Update с callback_query
-                await update.callback_query.edit_message_text(
-                    text=message,
-                    reply_markup=reply_markup,
-                    parse_mode='Markdown',
-                )
-            elif hasattr(update, 'edit_message_text'):
-                # Это CallbackQuery напрямую
-                await update.edit_message_text(
-                    text=message,
-                    reply_markup=reply_markup,
-                    parse_mode='Markdown',
-                )
-            else:
-                # Это обычное сообщение
-                await context.bot.send_message(
-                    chat_id=update.effective_chat.id,
-                    text=message,
-                    reply_markup=reply_markup,
-                    parse_mode='Markdown',
-                )
-        except Exception as e:
-            if "Message is not modified" in str(e):
-                # Игнорируем эту ошибку - сообщение уже правильное
-                logger.info("Message is not modified - ignoring")
-                return
-            else:
-                # Перебрасываем другие ошибки
-                raise
+        from telegram_bot.utils.telegram_resilience import send_or_edit_message
+
+        await send_or_edit_message(
+            update,
+            context,
+            text=message,
+            reply_markup=reply_markup,
+            parse_mode='Markdown',
+        )
     
     async def _send_error_message(
         self,
