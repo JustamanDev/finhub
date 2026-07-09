@@ -218,6 +218,67 @@ class TextHandler(BaseHandler):
         finally:
             context.user_data.pop('goal_deposit_goal_id', None)
 
+    async def _handle_voice_goal_pending_text(
+        self,
+        update: Update,
+        context: ContextTypes.DEFAULT_TYPE,
+        telegram_user,
+        message_text: str,
+    ) -> bool:
+        """Continue goal picker via text while VOICE_GOAL_PENDING is set."""
+        from telegram_bot.services.command_executor import VOICE_GOAL_PENDING_KEY
+        from telegram_bot.voice.goal_resolver import GoalResolver, ResolveStatus
+        from telegram_bot.voice.intents import ParsedVoiceCommand
+
+        pending = context.user_data.get(VOICE_GOAL_PENDING_KEY)
+        if not pending:
+            return False
+
+        text = (message_text or '').strip()
+        if not text:
+            await context.bot.send_message(
+                chat_id=update.effective_chat.id,
+                text='Выберите цель кнопкой или напишите название.',
+            )
+            return True
+
+        if text.lower() in {'отмена', 'cancel', 'стоп'}:
+            context.user_data.pop(VOICE_GOAL_PENDING_KEY, None)
+            await context.bot.send_message(
+                chat_id=update.effective_chat.id,
+                text='❌ Голосовая команда отменена.',
+            )
+            return True
+
+        command = pending.get('command')
+        if not isinstance(command, ParsedVoiceCommand):
+            context.user_data.pop(VOICE_GOAL_PENDING_KEY, None)
+            return False
+
+        user = await sync_to_async(lambda: telegram_user.user)()
+        resolved = await sync_to_async(GoalResolver(user).resolve)(text)
+        if resolved.status == ResolveStatus.MATCHED and resolved.match:
+            context.user_data.pop(VOICE_GOAL_PENDING_KEY, None)
+            command.goal = resolved.match
+            command.goal_title = resolved.match.title
+            await self._command_executor.execute_manage_goal(
+                update,
+                context,
+                telegram_user,
+                command,
+            )
+            return True
+
+        command.goal_title = text
+        context.user_data[VOICE_GOAL_PENDING_KEY] = {'command': command}
+        await self._command_executor.prompt_goal_resolution(
+            update,
+            context,
+            telegram_user,
+            command,
+        )
+        return True
+
     async def _handle_goal_withdraw_input(
         self,
         update: Update,
@@ -491,7 +552,32 @@ class TextHandler(BaseHandler):
                     message_text,
                 )
                 return
-            
+
+            from telegram_bot.services.command_executor import (
+                VOICE_GOAL_PENDING_KEY,
+                VOICE_PENDING_KEY,
+            )
+
+            if context.user_data.get(VOICE_PENDING_KEY):
+                await context.bot.send_message(
+                    chat_id=update.effective_chat.id,
+                    text=(
+                        'Сначала подтвердите или отмените предыдущую '
+                        'голосовую команду (✅ / ❌).'
+                    ),
+                )
+                return
+
+            if context.user_data.get(VOICE_GOAL_PENDING_KEY):
+                handled = await self._handle_voice_goal_pending_text(
+                    update,
+                    context,
+                    telegram_user,
+                    message_text,
+                )
+                if handled:
+                    return
+
             # Логируем входящее сообщение
             await self.log_message(
                 telegram_user,
