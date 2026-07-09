@@ -24,7 +24,10 @@
   Для manage_goal: goal_action обязателен если понятен; goal_title из списка целей
   (для create — новое имя); amount = сумма операции или целевая сумма при create.
   category_name = null, transaction_type = null.
-- ask_advisor — вопросы про бюджет, советы, аналитика, «сколько потратил»
+- ask_advisor — вопросы про бюджет, советы, аналитика
+  (примеры: «сколько потратил», «сколько свободно», «как дела с бюджетом»,
+  «куда уходят деньги», «дай совет по финансам»).
+  Для ask_advisor: amount/category_name/goal_* = null.
 - unknown — не finance-команда
 
 Для create_transaction и set_budget выбирай category_name только из переданного списка.

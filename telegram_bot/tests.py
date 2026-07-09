@@ -1006,6 +1006,107 @@ class VoiceGoalPhase4Tests(TestCase):
         self.assertEqual(rebuilt.amount, self.Decimal('2500'))
 
 
+class AdvisorSnapshotTests(TestCase):
+    def setUp(self):
+        from decimal import Decimal
+        from datetime import date
+        import calendar
+
+        from transactions.models import Transaction
+
+        self.Decimal = Decimal
+        self.user = User.objects.create_user(username='advisor_u', password='x')
+        self.products = Category.objects.create(
+            user=self.user,
+            name='Продукты',
+            type='expense',
+            color='#000000',
+            icon='🥕',
+        )
+        today = date.today()
+        start = date(today.year, today.month, 1)
+        last_day = calendar.monthrange(today.year, today.month)[1]
+        end = date(today.year, today.month, last_day)
+        Transaction.objects.create(
+            user=self.user,
+            category=self.products,
+            amount=Decimal('-1500'),
+            date=today,
+            description='test',
+        )
+        Budget.objects.create(
+            user=self.user,
+            category=self.products,
+            amount=Decimal('5000'),
+            period_type=Budget.MONTHLY,
+            start_date=start,
+            end_date=end,
+            is_active=True,
+        )
+
+    def test_snapshot_month_totals(self):
+        from asgiref.sync import async_to_sync
+        from telegram_bot.services.advisor_snapshot_service import (
+            AdvisorSnapshotService,
+        )
+
+        snapshot = async_to_sync(AdvisorSnapshotService(self.user).build)()
+        self.assertEqual(snapshot['month_totals']['expenses'], 1500.0)
+        self.assertTrue(snapshot['budgets'])
+        self.assertEqual(snapshot['budgets'][0]['category'], 'Продукты')
+        self.assertEqual(snapshot['budgets'][0]['limit'], 5000.0)
+
+    def test_empty_snapshot_reply_without_llm(self):
+        from telegram_bot.services.voice_advisor_executor import (
+            answer_from_snapshot,
+        )
+
+        empty = {
+            'period': {'name': 'июль 2026'},
+            'month_totals': {
+                'income': 0,
+                'expenses': 0,
+                'balance': 0,
+                'free_funds': 0,
+            },
+            'today': {'income': 0, 'expenses': 0, 'balance': 0},
+            'top_expense_categories': [],
+            'top_income_categories': [],
+            'budgets': [],
+            'goals': [],
+            'suggestions': [],
+        }
+        text = answer_from_snapshot('сколько потратил?', empty)
+        self.assertIn('мало данных', text.lower())
+
+    def test_suggestions_count_as_signal(self):
+        from telegram_bot.services.voice_advisor_executor import (
+            _snapshot_has_signal,
+        )
+
+        snapshot = {
+            'month_totals': {
+                'income': 0,
+                'expenses': 0,
+                'balance': 0,
+                'free_funds': 0,
+            },
+            'today': {'income': 0, 'expenses': 0, 'balance': 0},
+            'top_expense_categories': [],
+            'top_income_categories': [],
+            'budgets': [],
+            'goals': [],
+            'suggestions': [
+                {
+                    'title': 'Резерв',
+                    'description': 'Можно отложить',
+                    'suggested_amount': 1000.0,
+                },
+            ],
+        }
+        self.assertTrue(_snapshot_has_signal(snapshot))
+
+
 class NumberWordsTests(TestCase):
     def test_parse_simple(self):
         from decimal import Decimal
