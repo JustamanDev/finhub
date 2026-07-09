@@ -17,11 +17,12 @@
 
 ## В работе
 
-- [ ] **Voice Assistant v2** — Phase 4 MANAGE_GOAL, ветка `feature/voice-phase-4-goals`
+- [ ] **Voice Assistant v2** — Phase 5 Hardening (spoken numbers, metrics, E2E) — backlog
 
 ## Недавно завершено
 
-- [x] **Voice Phase 3** — SET_BUDGET create/update monthly limits
+- [x] **Voice Phase 4** — MANAGE_GOAL deposit/withdraw/create ([PR #34](https://github.com/JustamanDev/finhub/pull/34))
+- [x] **Voice Phase 3** — SET_BUDGET create/update monthly limits ([PR #33](https://github.com/JustamanDev/finhub/pull/33))
 - [x] **Voice Phase 2** — VoiceDialogManager (slot fill, timeout, category handoff)
 - [x] **Voice Phase 1** — CategoryResolver + disambiguation UI
 - [x] **Voice Phase 0** — bugfix baseline (description, wizards, income phrases)
@@ -42,8 +43,8 @@
 ## Changelog (компактно)
 
 ### 2026-07-09
-- Voice Phase 4 (in progress): MANAGE_GOAL deposit/withdraw/create via voice
-- Voice Phase 3: SET_BUDGET create/update monthly budget via voice
+- Voice Phase 4 merged: MANAGE_GOAL deposit/withdraw/create via voice (PR #34)
+- Voice Phase 3 merged: SET_BUDGET create/update monthly budget via voice (PR #33)
 - Fix: повторный клик по inline-кнопкам не падает с `Message is not modified` (`safe_edit_message_text`, `send_or_edit_message`)
 
 ### 2026-06-30 (voice input)
