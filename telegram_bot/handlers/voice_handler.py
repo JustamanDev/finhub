@@ -108,13 +108,15 @@ class VoiceHandler(BaseHandler):
                 )
                 return
 
-            user_state = await self.get_user_state(telegram_user)
-            if user_state.awaiting_category or user_state.awaiting_category_creation:
+            if _is_interactive_state(context):
                 context.user_data['_voice_text_override'] = clean_transcript
                 await self._text_handler.handle_text_message(update, context)
                 return
 
-            if _is_interactive_state(context):
+            user_state = await self.get_user_state(telegram_user)
+            if user_state.awaiting_category_creation or (
+                user_state.awaiting_category and user_state.current_amount
+            ):
                 context.user_data['_voice_text_override'] = clean_transcript
                 await self._text_handler.handle_text_message(update, context)
                 return

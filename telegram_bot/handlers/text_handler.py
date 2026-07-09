@@ -437,17 +437,7 @@ class TextHandler(BaseHandler):
                 )
                 return
 
-            if user_state.awaiting_category and user_state.current_amount:
-                await self._handle_awaiting_category_input(
-                    update,
-                    context,
-                    telegram_user,
-                    message_text,
-                    user_state,
-                )
-                return
-            
-            # Проверяем, ожидается ли ввод суммы лимита
+            # Wizard flows take priority over stale awaiting_category state.
             if 'limit_creation' in context.user_data:
                 await self._handle_limit_amount_input(
                     update,
@@ -456,14 +446,23 @@ class TextHandler(BaseHandler):
                     message_text,
                 )
                 return
-            
-            # Проверяем, ожидается ли ввод суммы бюджета
+
             if context.user_data.get('waiting_for_budget_amount'):
                 await self._handle_budget_amount_input(
                     update,
                     context,
                     telegram_user,
                     message_text,
+                )
+                return
+
+            if user_state.awaiting_category and user_state.current_amount:
+                await self._handle_awaiting_category_input(
+                    update,
+                    context,
+                    telegram_user,
+                    message_text,
+                    user_state,
                 )
                 return
             
