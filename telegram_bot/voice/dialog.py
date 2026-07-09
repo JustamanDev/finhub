@@ -341,6 +341,25 @@ class VoiceDialogManager:
         save_dialog(context, dialog)
 
         missing = self._missing_from_slots(dialog.slots)
+
+        # Named but unresolved category → picker/create UI (do not free-text loop).
+        if (
+            'category' in missing
+            and dialog.slots.get('amount') is not None
+            and dialog.slots.get('transaction_type')
+            and dialog.slots.get('category_name')
+            and not dialog.slots.get('category_id')
+        ):
+            command = slots_to_command(dialog.slots, dialog.transcript)
+            clear_dialog(context)
+            await self._executor.prompt_category_resolution(
+                update,
+                context,
+                telegram_user,
+                command,
+            )
+            return True
+
         step = next_step(missing)
         if step:
             dialog.step = step
@@ -380,18 +399,6 @@ class VoiceDialogManager:
                 chat_id=update.effective_chat.id,
                 text=question,
                 reply_markup=keyboard,
-            )
-            return True
-
-        # All slots filled — if category named but unresolved, hand off.
-        if dialog.slots.get('category_name') and not dialog.slots.get('category_id'):
-            command = slots_to_command(dialog.slots, dialog.transcript)
-            clear_dialog(context)
-            await self._executor.prompt_category_resolution(
-                update,
-                context,
-                telegram_user,
-                command,
             )
             return True
 
