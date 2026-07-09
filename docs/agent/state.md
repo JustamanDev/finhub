@@ -17,11 +17,14 @@
 
 ## В работе
 
-- [ ] **Voice Assistant v2** — Phase 2 dialog manager, ветка `feature/voice-phase-2-dialog-manager`
+- [ ] **Voice Assistant v2** — Phase 3 SET_BUDGET, ветка `feature/voice-phase-3-budget`
 
 ## Недавно завершено
 
-- [x] **Fix: Message is not modified** — `safe_edit_message_text` / `send_or_edit_message` во всех callback-обработчиках, ветка `fix/show-stats-not-modified`
+- [x] **Voice Phase 2** — VoiceDialogManager (slot fill, timeout, category handoff)
+- [x] **Voice Phase 1** — CategoryResolver + disambiguation UI
+- [x] **Voice Phase 0** — bugfix baseline (description, wizards, income phrases)
+- [x] **Fix: Message is not modified** — `safe_edit_message_text` / `send_or_edit_message`
 - [x] **Voice input MVP** — голосовой ввод расходов/доходов (`VOICE_ENABLED=True`)
 
 ## Backlog
@@ -38,6 +41,7 @@
 ## Changelog (компактно)
 
 ### 2026-07-09
+- Voice Phase 3 (in progress): SET_BUDGET create/update monthly budget via voice
 - Fix: повторный клик по inline-кнопкам не падает с `Message is not modified` (`safe_edit_message_text`, `send_or_edit_message`)
 
 ### 2026-06-30 (voice input)

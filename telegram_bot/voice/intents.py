@@ -52,6 +52,15 @@ class ParsedVoiceCommand:
     def should_reject(self) -> bool:
         if not self.success:
             return True
+        if self.intent == VoiceIntentType.SET_BUDGET:
+            if self.confidence < CONFIDENCE_CONFIRM and (
+                self.amount is None and not self.category_name and not self.category
+            ):
+                return True
+            # Partial budget command → dialog, not hard reject.
+            if self.amount is not None or self.category_name or self.category:
+                return False
+            return self.confidence < CONFIDENCE_CONFIRM
         if self.intent != VoiceIntentType.CREATE_TRANSACTION:
             return self.confidence < CONFIDENCE_CONFIRM
         # Partial create (missing amount) → dialog, not hard reject.

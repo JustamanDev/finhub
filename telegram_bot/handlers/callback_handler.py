@@ -394,8 +394,46 @@ class CallbackHandler(BaseHandler):
         
         # Получаем состояние пользователя
         user_state = await self.get_user_state(telegram_user)
-        
+
         if user_state.awaiting_category and user_state.current_amount:
+            from telegram_bot.services.command_executor import VOICE_CATEGORY_PENDING_KEY
+            from telegram_bot.voice.intents import (
+                ParsedVoiceCommand,
+                VoiceIntentType,
+            )
+
+            pending = context.user_data.get(VOICE_CATEGORY_PENDING_KEY)
+            pending_command = pending.get('command') if pending else None
+            if (
+                isinstance(pending_command, ParsedVoiceCommand)
+                and pending_command.intent == VoiceIntentType.SET_BUDGET
+            ):
+                amount = user_state.current_amount
+                user_state.last_transaction_type = 'expense'
+                user_state.current_amount = None
+                user_state.awaiting_category = False
+                await user_state.asave()
+                context.user_data.pop(VOICE_CATEGORY_PENDING_KEY, None)
+
+                if category.type != 'expense':
+                    await safe_edit_message_text(
+                        query,
+                        text='❌ Лимит можно задать только для категории расходов.',
+                    )
+                    return
+
+                pending_command.category = category
+                pending_command.category_name = category.name
+                pending_command.transaction_type = 'expense'
+                pending_command.amount = amount
+                await self._command_executor.execute_set_budget(
+                    update,
+                    context,
+                    telegram_user,
+                    pending_command,
+                )
+                return
+
             # Создаем транзакцию
             user = await sync_to_async(lambda: telegram_user.user)()
             transaction_service = TransactionService(user)
@@ -404,16 +442,15 @@ class CallbackHandler(BaseHandler):
                 category=category,
                 transaction_type=category.type,
             )
-            
+
             # Обновляем состояние
             user_state.last_transaction_type = category.type
             user_state.current_amount = None
             user_state.awaiting_category = False
             await user_state.asave()
 
-            from telegram_bot.services.command_executor import VOICE_CATEGORY_PENDING_KEY
             context.user_data.pop(VOICE_CATEGORY_PENDING_KEY, None)
-            
+
             # Отправляем подтверждение
             await self._send_transaction_confirmation(
                 query,

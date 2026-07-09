@@ -17,7 +17,7 @@ Voice → Whisper → [regex | LLM JSON] → VoiceRouter → CommandExecutor →
 | Компонент | Реальность |
 |-----------|------------|
 | `CREATE_TRANSACTION` | Работает частично |
-| `SET_BUDGET` | **Stub** — «скоро будет» |
+| `SET_BUDGET` | ✅ Phase 3 — create/update monthly expense budget |
 | `MANAGE_GOAL` | **Stub** |
 | `ASK_ADVISOR` | **Stub** + только log |
 | Уточнения | Только бинарное «✅ Да / ❌ Отмена» при confidence 0.5–0.85 |
@@ -116,11 +116,11 @@ flowchart TD
 
 | # | Пользователь говорит | Ожидание | Сейчас |
 |---|---------------------|----------|--------|
-| B1 | «лимит 5000 на продукты» | Budget monthly → Продукты | ❌ stub |
-| B2 | «бюджет 10 тысяч еда» | То же | ❌ stub |
-| B3 | «установи лимит на транспорт» (без суммы) | «Какой лимит?» | ❌ |
-| B4 | «лимит 5000» (без категории) | «На какую категорию?» | ❌ |
-| B5 | Категория без бюджетов / duplicate budget | Update vs create — уточнить | ❌ |
+| B1 | «лимит 5000 на продукты» | Budget monthly → Продукты | ✅ Phase 3 |
+| B2 | «бюджет 10 тысяч еда» | То же | ✅ Phase 3 (LLM / synonym) |
+| B3 | «установи лимит на транспорт» (без суммы) | «Какой лимит?» | ✅ Phase 3 dialog |
+| B4 | «лимит 5000» (без категории) | «На какую категорию?» | ✅ Phase 3 dialog |
+| B5 | Категория без бюджетов / duplicate budget | Update vs create — уточнить | ✅ Phase 3 confirm |
 | B6 | Голос в `waiting_for_budget_amount` | Сумма в wizard | ⚠️ works via override | OK |
 
 **Факапы B:**
@@ -132,7 +132,7 @@ flowchart TD
 
 | # | Сценарий | Ожидание | Сейчас |
 |---|----------|----------|--------|
-| L1 | «лимит 3000 кофе» в settings flow | `Budget.objects.create` monthly | ❌ stub (intent set_budget) |
+| L1 | «лимит 3000 кофе» в settings flow | `Budget.objects.create` monthly | ✅ Phase 3 SET_BUDGET |
 | L2 | Голос в `limit_creation` step | Принять сумму | ⚠️ override works | OK |
 | L3 | Лимит на несуществующую категорию | Уточнение | ❌ |
 
@@ -322,12 +322,16 @@ voice_dialog = {
 
 **Цель:** SET_BUDGET реально работает.
 
-- [ ] `VoiceBudgetExecutor` — create/update monthly budget
-- [ ] Router: убрать stub SET_BUDGET
-- [ ] Slot validation: amount + category required
-- [ ] Confirm при update existing budget
-- [ ] Унификация «бюджет» vs «лимит» в одном intent (или alias)
-- [ ] Тесты B1–B5, L1
+- [x] `VoiceBudgetExecutor` — create/update monthly budget
+- [x] Router: убрать stub SET_BUDGET
+- [x] Slot validation: amount + category required
+- [x] Confirm при update existing budget
+- [x] Унификация «бюджет» vs «лимит» в одном intent (или alias)
+- [x] Тесты B1–B5, L1
+
+**PR:** `feature/voice-phase-3-budget`
+
+**Критерий:** B1–B5, confirm на update, expense-only.
 
 ### Phase 4 — Goals voice (2 дня)
 
