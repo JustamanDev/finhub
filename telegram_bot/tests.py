@@ -739,6 +739,32 @@ class VoiceBudgetPhase3Tests(TestCase):
         self.assertEqual(command.category.id, self.products.id)
         self.assertEqual(command.transaction_type, 'expense')
 
+    def test_budget_category_then_amount(self):
+        from telegram_bot.voice.interpreter import VoiceInterpreter
+        from telegram_bot.voice.intents import VoiceIntentType
+
+        cafe = Category.objects.create(
+            user=self.user,
+            name='Кафе и рестораны',
+            type='expense',
+            color='#000000',
+            icon='🍽',
+        )
+        command = VoiceInterpreter(self.user).interpret(
+            'Установи бюджет на категорию «Кафе и рестораны», 5000 рублей.',
+        )
+        self.assertEqual(command.intent, VoiceIntentType.SET_BUDGET)
+        self.assertEqual(command.amount, self.Decimal('5000'))
+        self.assertEqual(command.category.id, cafe.id)
+        self.assertNotIn('5000', command.category_name or '')
+
+    def test_dialog_parse_spoken_amount_with_yes(self):
+        from telegram_bot.voice.dialog import _parse_amount
+
+        self.assertEqual(_parse_amount('Да, пять тысяч рублей.'), self.Decimal('5000'))
+        self.assertEqual(_parse_amount('пять тысяч'), self.Decimal('5000'))
+        self.assertEqual(_parse_amount('5000'), self.Decimal('5000'))
+
     def test_b2_budget_alias(self):
         from telegram_bot.voice.interpreter import VoiceInterpreter
         from telegram_bot.voice.intents import VoiceIntentType

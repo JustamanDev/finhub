@@ -89,14 +89,26 @@ NATURAL_INCOME_NOUN_RE = re.compile(
     r'(.+?)?[.\s]*$'
 )
 
-# «лимит 5000 продукты», «бюджет 10 тысяч на еду» (цифры; слова — через LLM)
+# «лимит 5000 продукты» OR «бюджет на кафе 5000» OR «лимит на транспорт»
 BUDGET_VOICE_RE = re.compile(
     r'(?i)^(?:лимит|бюджет|установи\s+лимит|установи\s+бюджет|'
-    r'задай\s+лимит|задай\s+бюджет)\s+'
+    r'задай\s+лимит|задай\s+бюджет|поставь\s+лимит|поставь\s+бюджет)\s+'
+    r'(?:'
+    # amount-first: «5000 на продукты», «5000 рублей кафе»
     r'(?:на\s+)?'
-    r'(?:(\d+(?:[.,]\d+)?)\s*)?'
+    r'(\d+(?:[.,]\d+)?)\s*'
     r'(?:руб(?:лей|ля|ль)?\.?\s*)?'
-    r'(?:(?:на\s+)?(?:категори(?:ю|и)\s+)?(.+?))?[.\s]*$'
+    r'(?:(?:на\s+)?(?:категори(?:ю|и)\s+)?(.+?))?'
+    r'|'
+    # category-first: «на категорию кафе 5000», «на транспорт 5000»
+    r'(?:на\s+)?(?:категори(?:ю|и)\s+)?(.+?)\s+'
+    r'(\d+(?:[.,]\d+)?)\s*'
+    r'(?:руб(?:лей|ля|ль)?\.?)?'
+    r'|'
+    # category-only: «на транспорт», «на категорию кафе»
+    r'(?:на\s+)?(?:категори(?:ю|и)\s+)?(.+?)'
+    r')'
+    r'[.\s]*$'
 )
 
 # «создай цель отпуск 100000», «новая цель iPad на 50000»
@@ -133,6 +145,20 @@ GOAL_WITHDRAW_RE = re.compile(
 def _normalize_transcript(text: str) -> str:
     cleaned = text.strip().replace('\u00a0', ' ')
     cleaned = re.sub(r'\s+', ' ', cleaned)
+    return cleaned
+
+
+def _clean_budget_category_name(name: str) -> str:
+    """Strip quotes, trailing amount crumbs, filler words from category span."""
+    cleaned = (name or '').strip().strip('«»"\'.,;:')
+    cleaned = re.sub(
+        r'(?i)\s+\d+(?:[.,]\d+)?\s*(?:руб(?:лей|ля|ль)?\.?)?\s*$',
+        '',
+        cleaned,
+    ).strip()
+    cleaned = cleaned.strip('«»"\'.,;:')
+    if cleaned.lower() in {'на', 'для', 'категорию', 'категории', 'категория'}:
+        return ''
     return cleaned
 
 
@@ -277,11 +303,14 @@ class VoiceInterpreter:
         match = BUDGET_VOICE_RE.match(text)
         if not match:
             return None
-        amount_raw, category_raw = match.groups()
-        category_name = (category_raw or '').strip().strip('.')
-        # Drop trailing filler words like «на»
-        if category_name.lower() in {'на', 'для'}:
-            category_name = ''
+        amount_first, cat_after_amount, cat_before_amount, amount_after, cat_only = (
+            match.groups()
+        )
+        amount_raw = amount_first or amount_after
+        category_name = (
+            cat_after_amount or cat_before_amount or cat_only or ''
+        ).strip()
+        category_name = _clean_budget_category_name(category_name)
 
         amount: Decimal | None = None
         if amount_raw:
