@@ -610,6 +610,9 @@ class TextHandler(BaseHandler):
             user_state.last_transaction_type = resolved_category.type
             await user_state.asave()
 
+            from telegram_bot.services.command_executor import VOICE_CATEGORY_PENDING_KEY
+            context.user_data.pop(VOICE_CATEGORY_PENDING_KEY, None)
+
             await self._command_executor.send_transaction_created(
                 update,
                 context,

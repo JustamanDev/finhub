@@ -403,6 +403,9 @@ class CallbackHandler(BaseHandler):
             user_state.current_amount = None
             user_state.awaiting_category = False
             await user_state.asave()
+
+            from telegram_bot.services.command_executor import VOICE_CATEGORY_PENDING_KEY
+            context.user_data.pop(VOICE_CATEGORY_PENDING_KEY, None)
             
             # Отправляем подтверждение
             await self._send_transaction_confirmation(
