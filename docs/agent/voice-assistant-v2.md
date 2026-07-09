@@ -307,12 +307,14 @@ voice_dialog = {
 
 **Цель:** multi-turn уточнения.
 
-- [ ] `VoiceDialogManager` + `voice_dialog` state
-- [ ] Steps: `awaiting_amount`, `awaiting_category`, `awaiting_type`, `awaiting_confirm`
-- [ ] Голос/text ответ продолжает dialog (не новый interpret с нуля)
-- [ ] Конкретные вопросы вместо generic error
-- [ ] Timeout / cancel (`voice_cancel` сбрасывает dialog)
-- [ ] X1, X4, X5 handling
+- [x] `VoiceDialogManager` + `voice_dialog` state
+- [x] Steps: `awaiting_amount`, `awaiting_category`, `awaiting_type`, `awaiting_confirm`
+- [x] Голос/text ответ продолжает dialog (не новый interpret с нуля)
+- [x] Конкретные вопросы вместо generic error
+- [x] Timeout / cancel (`voice_cancel` сбрасывает dialog)
+- [x] X1, X4, X5 handling (pending block + dialog priority + timeout)
+
+**PR:** `feature/voice-phase-2-dialog-manager`
 
 **Критерий:** I5, B3, B4, «500» → picker без лишних шагов, уточнение голосом.
 

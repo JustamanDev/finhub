@@ -60,6 +60,13 @@ class CallbackHandler(BaseHandler):
                 )
             elif query.data == 'voice_cancel':
                 await self._handle_voice_cancel(query, context)
+            elif query.data.startswith('voice_dialog_type_'):
+                await self._handle_voice_dialog_type(
+                    update,
+                    query,
+                    context,
+                    telegram_user,
+                )
             elif query.data.startswith('voice_cat_pick_'):
                 await self._handle_voice_cat_pick(
                     update,
@@ -1765,6 +1772,23 @@ class CallbackHandler(BaseHandler):
             telegram_user,
         )
 
+    async def _handle_voice_dialog_type(
+        self,
+        update: Update,
+        query: CallbackQuery,
+        context: ContextTypes.DEFAULT_TYPE,
+        telegram_user,
+    ) -> None:
+        from telegram_bot.voice.dialog import VoiceDialogManager
+
+        tx_type = 'income' if query.data.endswith('income') else 'expense'
+        await VoiceDialogManager().set_type_callback(
+            update,
+            context,
+            telegram_user,
+            tx_type,
+        )
+
     async def _handle_voice_cancel(
         self,
         query: CallbackQuery,
@@ -1774,8 +1798,10 @@ class CallbackHandler(BaseHandler):
             VOICE_CATEGORY_PENDING_KEY,
             VOICE_PENDING_KEY,
         )
+        from telegram_bot.voice.dialog import clear_dialog
 
         context.user_data.pop(VOICE_PENDING_KEY, None)
         context.user_data.pop(VOICE_CATEGORY_PENDING_KEY, None)
+        clear_dialog(context)
         await query.answer('Отменено')
         await safe_edit_message_text(query, text='❌ Голосовая команда отменена.') 

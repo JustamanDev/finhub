@@ -282,6 +282,18 @@ class ParsedVoiceCommandTests(TestCase):
         )
         self.assertTrue(command.should_reject())
 
+    def test_partial_without_amount_does_not_reject(self):
+        command = ParsedVoiceCommand(
+            intent=VoiceIntentType.CREATE_TRANSACTION,
+            success=True,
+            confidence=0.7,
+            raw_transcript='зарплата',
+            category_name='Зарплата',
+            transaction_type='income',
+            amount=None,
+        )
+        self.assertFalse(command.should_reject())
+
     def test_amount_only_skips_confirmation(self):
         command = ParsedVoiceCommand(
             intent=VoiceIntentType.CREATE_TRANSACTION,
@@ -593,3 +605,94 @@ class CategoryResolverTests(TestCase):
         )
         if result.status == ResolveStatus.AMBIGUOUS:
             self.assertGreaterEqual(len(result.candidates), 2)
+
+
+class VoiceDialogManagerTests(TestCase):
+    def test_missing_slots_amount(self):
+        from telegram_bot.voice.dialog import missing_slots_for_create, next_step
+
+        command = ParsedVoiceCommand(
+            intent=VoiceIntentType.CREATE_TRANSACTION,
+            success=True,
+            confidence=0.8,
+            raw_transcript='зарплата',
+            category_name='Зарплата',
+            category=object(),
+            transaction_type='income',
+            amount=None,
+        )
+        missing = missing_slots_for_create(command)
+        self.assertEqual(missing, ['amount'])
+        self.assertEqual(next_step(missing), 'awaiting_amount')
+
+    def test_missing_slots_unresolved_category(self):
+        from telegram_bot.voice.dialog import missing_slots_for_create, next_step
+
+        command = ParsedVoiceCommand(
+            intent=VoiceIntentType.CREATE_TRANSACTION,
+            success=True,
+            confidence=0.9,
+            raw_transcript='500 xyz',
+            amount=Decimal('500'),
+            category_name='xyz',
+            transaction_type='expense',
+            category=None,
+            command_type='amount_category',
+        )
+        missing = missing_slots_for_create(command)
+        self.assertEqual(missing, ['category'])
+        self.assertEqual(next_step(missing), 'awaiting_category')
+
+    def test_amount_only_no_dialog_slots(self):
+        from telegram_bot.voice.dialog import missing_slots_for_create
+
+        command = ParsedVoiceCommand(
+            intent=VoiceIntentType.CREATE_TRANSACTION,
+            success=True,
+            confidence=1.0,
+            raw_transcript='500',
+            amount=Decimal('500'),
+            transaction_type='expense',
+            command_type='amount_only',
+        )
+        self.assertEqual(missing_slots_for_create(command), [])
+
+    def test_dialog_timeout(self):
+        from telegram_bot.voice.dialog import (
+            VoiceDialogState,
+            is_dialog_expired,
+        )
+
+        dialog = VoiceDialogState(
+            intent='create_transaction',
+            step='awaiting_amount',
+            created_at=0,
+        )
+        self.assertTrue(is_dialog_expired(dialog, timeout_sec=1))
+
+    def test_parse_amount_and_type_helpers(self):
+        from telegram_bot.voice.dialog import _parse_amount, _parse_type
+
+        self.assertEqual(_parse_amount('1 500,50'), Decimal('1500.50'))
+        self.assertEqual(_parse_type('доход'), 'income')
+        self.assertEqual(_parse_type('расход'), 'expense')
+        self.assertIsNone(_parse_type('что-то'))
+
+    def test_slots_roundtrip(self):
+        from telegram_bot.voice.dialog import command_to_slots, slots_to_command
+
+        command = ParsedVoiceCommand(
+            intent=VoiceIntentType.CREATE_TRANSACTION,
+            success=True,
+            confidence=0.9,
+            raw_transcript='зарплата',
+            amount=None,
+            category_name='Зарплата',
+            transaction_type='income',
+        )
+        slots = command_to_slots(command)
+        slots['amount'] = Decimal('50000')
+        rebuilt = slots_to_command(slots, 'зарплата')
+        self.assertEqual(rebuilt.amount, Decimal('50000'))
+        self.assertEqual(rebuilt.transaction_type, 'income')
+        self.assertEqual(rebuilt.category_name, 'Зарплата')

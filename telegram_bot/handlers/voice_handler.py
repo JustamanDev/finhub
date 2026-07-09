@@ -21,6 +21,12 @@ from telegram_bot.voice.audio_download import (
     resolve_audio_file,
 )
 from telegram_bot.voice.config import voice_enabled
+from telegram_bot.voice.dialog import (
+    VoiceDialogManager,
+    clear_dialog,
+    get_dialog,
+    is_dialog_expired,
+)
 from telegram_bot.voice.interpreter import VoiceInterpreter
 from telegram_bot.voice.intents import ParsedVoiceCommand
 from telegram_bot.voice.router import VoiceRouter
@@ -49,6 +55,7 @@ class VoiceHandler(BaseHandler):
         super().__init__()
         self._router = VoiceRouter()
         self._text_handler = TextHandler()
+        self._dialog = VoiceDialogManager()
 
     async def handle_voice_message(
         self,
@@ -104,6 +111,7 @@ class VoiceHandler(BaseHandler):
             if _is_interactive_state(context):
                 context.user_data.pop(VOICE_PENDING_KEY, None)
                 context.user_data.pop(VOICE_CATEGORY_PENDING_KEY, None)
+                clear_dialog(context)
                 context.user_data['_voice_text_override'] = clean_transcript
                 await self._text_handler.handle_text_message(update, context)
                 return
@@ -116,6 +124,23 @@ class VoiceHandler(BaseHandler):
                 # Keep VOICE_CATEGORY_PENDING until pick/create/cancel completes.
                 context.user_data['_voice_text_override'] = clean_transcript
                 await self._text_handler.handle_text_message(update, context)
+                return
+
+            dialog = get_dialog(context)
+            if dialog:
+                if is_dialog_expired(dialog):
+                    clear_dialog(context)
+                    await context.bot.send_message(
+                        chat_id=update.effective_chat.id,
+                        text='⏱ Диалог устарел. Отправьте команду заново.',
+                    )
+                    return
+                await self._dialog.continue_dialog(
+                    update,
+                    context,
+                    telegram_user,
+                    clean_transcript,
+                )
                 return
 
             if context.user_data.get(VOICE_PENDING_KEY) or context.user_data.get(
