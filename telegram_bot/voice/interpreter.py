@@ -110,6 +110,18 @@ def _compact_natural_income_phrase(text: str) -> str | None:
     return None
 
 
+def voice_text_parse_candidates(text: str) -> list[str]:
+    """Candidate strings for parsing voice-derived text in text flows."""
+    candidates = [text]
+    for compact in (
+        _compact_natural_phrase(text),
+        _compact_natural_income_phrase(text),
+    ):
+        if compact and compact not in candidates:
+            candidates.append(compact)
+    return candidates
+
+
 class VoiceInterpreter:
     def __init__(self, user: User):
         self.user = user

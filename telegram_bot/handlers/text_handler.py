@@ -11,6 +11,7 @@ from telegram_bot.services.command_executor import CommandExecutor
 from telegram_bot.services.transaction_service import TransactionService
 from telegram_bot.services.category_management_service import CategoryManagementService
 from telegram_bot.services.goal_service import GoalService
+from telegram_bot.voice.interpreter import voice_text_parse_candidates
 from budgets.models import Budget
 from categories.models import Category
 from datetime import datetime as _dt
@@ -537,7 +538,11 @@ class TextHandler(BaseHandler):
         amount = user_state.current_amount
         raw_text = message_text.strip()
 
-        parsed = await sync_to_async(parser.parse)(raw_text)
+        parsed: dict = {'success': False}
+        for candidate in voice_text_parse_candidates(raw_text):
+            parsed = await sync_to_async(parser.parse)(candidate)
+            if parsed.get('success'):
+                break
         if parsed.get('success') and parsed.get('type') == 'amount_only':
             user_state.current_amount = parsed['amount']
             if parsed.get('transaction_type'):

@@ -99,6 +99,7 @@ class VoiceHandler(BaseHandler):
             await status_message.edit_text(f'🎤 Распознано: «{clean_transcript}»')
 
             if _is_interactive_state(context):
+                context.user_data.pop(VOICE_PENDING_KEY, None)
                 context.user_data['_voice_text_override'] = clean_transcript
                 await self._text_handler.handle_text_message(update, context)
                 return
@@ -107,6 +108,7 @@ class VoiceHandler(BaseHandler):
             if user_state.awaiting_category_creation or (
                 user_state.awaiting_category and user_state.current_amount
             ):
+                context.user_data.pop(VOICE_PENDING_KEY, None)
                 context.user_data['_voice_text_override'] = clean_transcript
                 await self._text_handler.handle_text_message(update, context)
                 return
