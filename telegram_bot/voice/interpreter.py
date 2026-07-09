@@ -80,6 +80,16 @@ NATURAL_INCOME_NOUN_RE = re.compile(
     r'(.+?)?[.\s]*$'
 )
 
+# «лимит 5000 продукты», «бюджет 10 тысяч на еду» (цифры; слова — через LLM)
+BUDGET_VOICE_RE = re.compile(
+    r'(?i)^(?:лимит|бюджет|установи\s+лимит|установи\s+бюджет|'
+    r'задай\s+лимит|задай\s+бюджет)\s+'
+    r'(?:на\s+)?'
+    r'(?:(\d+(?:[.,]\d+)?)\s*)?'
+    r'(?:руб(?:лей|ля|ль)?\.?\s*)?'
+    r'(?:(?:на\s+)?(?:категори(?:ю|и)\s+)?(.+?))?[.\s]*$'
+)
+
 
 def _normalize_transcript(text: str) -> str:
     cleaned = text.strip().replace('\u00a0', ' ')
@@ -146,6 +156,10 @@ class VoiceInterpreter:
         return self._interpret_with_llm(text)
 
     def _try_regex_fast_path(self, text: str) -> ParsedVoiceCommand | None:
+        budget = self._try_budget_fast_path(text)
+        if budget:
+            return budget
+
         candidates = (
             text,
             _compact_natural_phrase(text),
@@ -181,6 +195,56 @@ class VoiceInterpreter:
                     command_type='amount_only',
                 )
         return None
+
+    def _try_budget_fast_path(self, text: str) -> ParsedVoiceCommand | None:
+        match = BUDGET_VOICE_RE.match(text)
+        if not match:
+            return None
+        amount_raw, category_raw = match.groups()
+        category_name = (category_raw or '').strip().strip('.')
+        # Drop trailing filler words like «на»
+        if category_name.lower() in {'на', 'для'}:
+            category_name = ''
+
+        amount: Decimal | None = None
+        if amount_raw:
+            try:
+                amount = Decimal(amount_raw.replace(',', '.')).copy_abs()
+            except (InvalidOperation, ValueError):
+                return None
+            if amount <= 0:
+                return None
+
+        if amount is None and not category_name:
+            return None
+
+        category = None
+        if category_name:
+            from telegram_bot.voice.category_resolver import (
+                CategoryResolver,
+                ResolveStatus,
+            )
+
+            resolved = CategoryResolver(self.user).resolve(
+                category_name,
+                'expense',
+            )
+            if resolved.status == ResolveStatus.MATCHED:
+                category = resolved.match
+
+        return ParsedVoiceCommand(
+            intent=VoiceIntentType.SET_BUDGET,
+            success=True,
+            confidence=1.0,
+            raw_transcript=text,
+            transaction_type='expense',
+            amount=amount,
+            category_name=category_name or None,
+            category=category,
+            command_type='amount_category' if category_name else (
+                'amount_only' if amount is not None else None
+            ),
+        )
 
     def _interpret_with_llm(self, text: str) -> ParsedVoiceCommand:
         api_key = openai_api_key()
@@ -255,6 +319,53 @@ class VoiceInterpreter:
         intent = INTENT_MAP.get(intent_raw, VoiceIntentType.UNKNOWN)
         confidence = float(payload.get('confidence', 0.0))
         confidence = max(0.0, min(1.0, confidence))
+
+        if intent == VoiceIntentType.SET_BUDGET:
+            amount_raw = payload.get('amount')
+            category_name = (payload.get('category_name') or '').strip()
+            amount: Decimal | None = None
+            if amount_raw is not None:
+                try:
+                    amount = Decimal(str(amount_raw)).copy_abs()
+                except (InvalidOperation, ValueError):
+                    return ParsedVoiceCommand(
+                        intent=VoiceIntentType.SET_BUDGET,
+                        success=False,
+                        confidence=0.0,
+                        raw_transcript=text,
+                        error='Не удалось распознать сумму лимита.',
+                    )
+
+            category = None
+            if category_name:
+                from telegram_bot.voice.category_resolver import (
+                    CategoryResolver,
+                    ResolveStatus,
+                )
+
+                resolved = CategoryResolver(self.user).resolve(
+                    category_name,
+                    'expense',
+                )
+                if resolved.status == ResolveStatus.MATCHED:
+                    category = resolved.match
+
+            return ParsedVoiceCommand(
+                intent=VoiceIntentType.SET_BUDGET,
+                success=True,
+                confidence=max(confidence, 0.6) if (
+                    amount is not None or category_name
+                ) else confidence,
+                raw_transcript=text,
+                transaction_type='expense',
+                amount=amount,
+                category_name=category_name or None,
+                category=category,
+                description=(payload.get('description') or '').strip(),
+                command_type='amount_category' if category_name else (
+                    'amount_only' if amount is not None else None
+                ),
+            )
 
         if intent != VoiceIntentType.CREATE_TRANSACTION:
             return ParsedVoiceCommand(

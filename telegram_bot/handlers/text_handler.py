@@ -624,6 +624,42 @@ class TextHandler(BaseHandler):
             )
             return
 
+        from telegram_bot.services.command_executor import VOICE_CATEGORY_PENDING_KEY
+        from telegram_bot.voice.intents import ParsedVoiceCommand, VoiceIntentType
+
+        pending = context.user_data.get(VOICE_CATEGORY_PENDING_KEY)
+        pending_command = pending.get('command') if pending else None
+        if (
+            isinstance(pending_command, ParsedVoiceCommand)
+            and pending_command.intent == VoiceIntentType.SET_BUDGET
+        ):
+            user_state.current_amount = None
+            user_state.awaiting_category = False
+            user_state.last_transaction_type = 'expense'
+            await user_state.asave()
+            context.user_data.pop(VOICE_CATEGORY_PENDING_KEY, None)
+
+            if resolved_category.type != 'expense':
+                await self._command_executor.send_error(
+                    update,
+                    context,
+                    'Лимит можно задать только для категории расходов.',
+                    voice_transcript=message_text,
+                )
+                return
+
+            pending_command.category = resolved_category
+            pending_command.category_name = resolved_category.name
+            pending_command.transaction_type = 'expense'
+            pending_command.amount = tx_amount
+            await self._command_executor.execute_set_budget(
+                update,
+                context,
+                telegram_user,
+                pending_command,
+            )
+            return
+
         try:
             transaction = await TransactionService(user).create_transaction(
                 amount=tx_amount,
@@ -635,7 +671,6 @@ class TextHandler(BaseHandler):
             user_state.last_transaction_type = resolved_category.type
             await user_state.asave()
 
-            from telegram_bot.services.command_executor import VOICE_CATEGORY_PENDING_KEY
             context.user_data.pop(VOICE_CATEGORY_PENDING_KEY, None)
 
             await self._command_executor.send_transaction_created(
@@ -832,9 +867,9 @@ class TextHandler(BaseHandler):
                 icon=icon,
             )
 
-            voice_create_after = bool(
-                (user_state.context_data or {}).get('voice_create_after'),
-            )
+            context_data = user_state.context_data or {}
+            voice_create_after = bool(context_data.get('voice_create_after'))
+            voice_intent = context_data.get('voice_intent') or ''
             pending_amount = user_state.current_amount
 
             # Сбрасываем состояние создания категории
@@ -848,18 +883,54 @@ class TextHandler(BaseHandler):
                 from telegram_bot.services.command_executor import (
                     VOICE_CATEGORY_PENDING_KEY,
                 )
+                from telegram_bot.voice.intents import (
+                    ParsedVoiceCommand,
+                    VoiceIntentType,
+                )
 
                 context.user_data.pop(VOICE_CATEGORY_PENDING_KEY, None)
+                user_state.current_amount = None
+                user_state.awaiting_category = False
+                user_state.last_transaction_type = category.type
+                await user_state.asave()
+
+                if voice_intent == VoiceIntentType.SET_BUDGET.value:
+                    if category.type != 'expense':
+                        await self._command_executor.send_error(
+                            update,
+                            context,
+                            (
+                                'Категория создана, но лимит можно задать '
+                                'только для расходов.'
+                            ),
+                            voice_transcript=text,
+                        )
+                        return
+                    command = ParsedVoiceCommand(
+                        intent=VoiceIntentType.SET_BUDGET,
+                        success=True,
+                        confidence=1.0,
+                        raw_transcript=text,
+                        transaction_type='expense',
+                        amount=pending_amount,
+                        category_name=category.name,
+                        category=category,
+                        command_type='amount_category',
+                    )
+                    await self._command_executor.execute_set_budget(
+                        update,
+                        context,
+                        telegram_user,
+                        command,
+                    )
+                    return
+
                 try:
                     transaction = await TransactionService(user).create_transaction(
                         amount=pending_amount,
                         category=category,
                         transaction_type=category.type,
                     )
-                    user_state.current_amount = None
-                    user_state.awaiting_category = False
-                    user_state.last_transaction_type = category.type
-                    await user_state.asave()
                     await self._command_executor.send_transaction_created(
                         update,
                         context,

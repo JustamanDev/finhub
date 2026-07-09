@@ -131,6 +131,18 @@ def missing_slots_for_create(command: ParsedVoiceCommand) -> list[str]:
     return missing
 
 
+def missing_slots_for_budget(command: ParsedVoiceCommand) -> list[str]:
+    """Return ordered missing slots for SET_BUDGET dialog."""
+    missing: list[str] = []
+    if command.amount is None:
+        missing.append('amount')
+    if not command.category and not command.category_name:
+        missing.append('category')
+    elif command.category_name and not command.category:
+        missing.append('category')
+    return missing
+
+
 def next_step(missing: list[str]) -> str | None:
     if 'amount' in missing:
         return STEP_AMOUNT
@@ -141,16 +153,25 @@ def next_step(missing: list[str]) -> str | None:
     return None
 
 
-def prompt_for_step(step: str, slots: dict[str, Any]) -> str:
+def prompt_for_step(step: str, slots: dict[str, Any], *, intent: str = '') -> str:
     amount = slots.get('amount')
     cat = slots.get('category_name') or slots.get('category_label')
+    is_budget = intent == VoiceIntentType.SET_BUDGET.value
     if step == STEP_AMOUNT:
+        if is_budget:
+            if cat:
+                return f'Какой лимит установить на «{cat}»? Например: 5000'
+            return 'Какой лимит установить? Например: 5000'
         if cat:
             return f'Какую сумму записать в «{cat}»?'
         return 'Какую сумму записать? Например: 500 или 1500.50'
     if step == STEP_TYPE:
         return 'Это расход или доход?'
     if step == STEP_CATEGORY:
+        if is_budget:
+            if amount is not None:
+                return f'На какую категорию установить лимит {amount:,.0f}₽?'
+            return 'На какую категорию установить лимит?'
         if amount is not None:
             return f'На какую категорию записать {amount:,.0f}₽?'
         return 'На какую категорию записать?'
@@ -158,7 +179,9 @@ def prompt_for_step(step: str, slots: dict[str, Any]) -> str:
 
 
 def command_to_slots(command: ParsedVoiceCommand) -> dict[str, Any]:
-    slots: dict[str, Any] = {}
+    slots: dict[str, Any] = {
+        'intent': command.intent.value,
+    }
     if command.amount is not None:
         slots['amount'] = command.amount
     if command.transaction_type:
@@ -187,6 +210,12 @@ def slots_to_command(slots: dict[str, Any], transcript: str) -> ParsedVoiceComma
     # category object may be re-loaded by caller; keep id in slots
     category_name = slots.get('category_name')
     tx_type = slots.get('transaction_type') or 'expense'
+    intent_raw = slots.get('intent') or VoiceIntentType.CREATE_TRANSACTION.value
+    intent = (
+        VoiceIntentType.SET_BUDGET
+        if intent_raw == VoiceIntentType.SET_BUDGET.value
+        else VoiceIntentType.CREATE_TRANSACTION
+    )
     has_category = category_id is not None or category is not None
     if category_name and not has_category:
         command_type = 'amount_category'
@@ -195,7 +224,7 @@ def slots_to_command(slots: dict[str, Any], transcript: str) -> ParsedVoiceComma
     else:
         command_type = 'amount_only'
     return ParsedVoiceCommand(
-        intent=VoiceIntentType.CREATE_TRANSACTION,
+        intent=intent,
         success=True,
         confidence=float(slots.get('confidence') or 1.0),
         raw_transcript=transcript or slots.get('raw_transcript') or '',
@@ -262,7 +291,7 @@ class VoiceDialogManager:
             slots=command_to_slots(command),
             transcript=command.raw_transcript,
         )
-        question = prompt_for_step(step, dialog.slots)
+        question = prompt_for_step(step, dialog.slots, intent=dialog.intent)
         dialog.last_prompt = question
         save_dialog(context, dialog)
 
@@ -324,7 +353,11 @@ class VoiceDialogManager:
         if not text:
             await context.bot.send_message(
                 chat_id=update.effective_chat.id,
-                text=dialog.last_prompt or prompt_for_step(dialog.step, dialog.slots),
+                text=dialog.last_prompt or prompt_for_step(
+                    dialog.step,
+                    dialog.slots,
+                    intent=dialog.intent,
+                ),
             )
             return True
 
@@ -340,13 +373,16 @@ class VoiceDialogManager:
         await self._apply_reply(dialog, telegram_user, text)
         save_dialog(context, dialog)
 
-        missing = self._missing_from_slots(dialog.slots)
+        missing = self._missing_from_slots(dialog.slots, intent=dialog.intent)
 
         # Named but unresolved category → picker/create UI (do not free-text loop).
         if (
             'category' in missing
             and dialog.slots.get('amount') is not None
-            and dialog.slots.get('transaction_type')
+            and (
+                dialog.intent == VoiceIntentType.SET_BUDGET.value
+                or dialog.slots.get('transaction_type')
+            )
             and dialog.slots.get('category_name')
             and not dialog.slots.get('category_id')
         ):
@@ -363,7 +399,7 @@ class VoiceDialogManager:
         step = next_step(missing)
         if step:
             dialog.step = step
-            question = prompt_for_step(step, dialog.slots)
+            question = prompt_for_step(step, dialog.slots, intent=dialog.intent)
             dialog.last_prompt = question
             save_dialog(context, dialog)
             keyboard = None
@@ -424,15 +460,17 @@ class VoiceDialogManager:
             await update.callback_query.answer('Диалог не найден')
             return
         dialog.slots['transaction_type'] = transaction_type
-        dialog.step = next_step(self._missing_from_slots(dialog.slots)) or STEP_CONFIRM
+        dialog.step = next_step(
+            self._missing_from_slots(dialog.slots, intent=dialog.intent),
+        ) or STEP_CONFIRM
         save_dialog(context, dialog)
         await update.callback_query.answer()
         # Re-enter continue with empty? Better finish path:
-        missing = self._missing_from_slots(dialog.slots)
+        missing = self._missing_from_slots(dialog.slots, intent=dialog.intent)
         step = next_step(missing)
         if step:
             dialog.step = step
-            question = prompt_for_step(step, dialog.slots)
+            question = prompt_for_step(step, dialog.slots, intent=dialog.intent)
             dialog.last_prompt = question
             save_dialog(context, dialog)
             await context.bot.send_message(
@@ -508,7 +546,9 @@ class VoiceDialogManager:
             return
 
         if dialog.step == STEP_CATEGORY:
-            tx_type = dialog.slots.get('transaction_type') or 'expense'
+            tx_type = 'expense' if (
+                dialog.intent == VoiceIntentType.SET_BUDGET.value
+            ) else (dialog.slots.get('transaction_type') or 'expense')
             # Full phrase may include amount correction
             for candidate in voice_text_parse_candidates(text):
                 parsed = await sync_to_async(VoiceInterpreter(user).interpret)(
@@ -520,7 +560,11 @@ class VoiceDialogManager:
                     dialog.slots['category_label'] = (
                         f'{parsed.category.icon} {parsed.category.name}'
                     )
-                    dialog.slots['transaction_type'] = parsed.category.type
+                    dialog.slots['transaction_type'] = (
+                        'expense'
+                        if dialog.intent == VoiceIntentType.SET_BUDGET.value
+                        else parsed.category.type
+                    )
                     if parsed.amount is not None:
                         dialog.slots['amount'] = parsed.amount
                     return
@@ -543,21 +587,25 @@ class VoiceDialogManager:
             else:
                 dialog.slots['category_name'] = text
 
-    def _missing_from_slots(self, slots: dict[str, Any]) -> list[str]:
+    def _missing_from_slots(
+        self,
+        slots: dict[str, Any],
+        *,
+        intent: str = '',
+    ) -> list[str]:
+        is_budget = intent == VoiceIntentType.SET_BUDGET.value
         missing: list[str] = []
         if slots.get('amount') is None:
             missing.append('amount')
-        if not slots.get('transaction_type'):
+        if not is_budget and not slots.get('transaction_type'):
             missing.append('transaction_type')
-        # Need category if name present without id, OR neither name nor id
-        # and we already have amount (then amount_only is OK — no category missing)
         has_id = slots.get('category_id') is not None
         has_name = bool(slots.get('category_name'))
-        if has_name and not has_id:
+        if is_budget:
+            if not has_id:
+                missing.append('category')
+        elif has_name and not has_id:
             missing.append('category')
-        elif not has_name and not has_id and slots.get('amount') is None:
-            # category-only start like «зарплата» — after amount filled, try resolve name
-            pass
         return missing
 
     async def _finish(
@@ -584,6 +632,32 @@ class VoiceDialogManager:
                 command.command_type = 'amount_category'
             except Category.DoesNotExist:
                 command.category = None
+
+        if command.intent == VoiceIntentType.SET_BUDGET:
+            command.transaction_type = 'expense'
+            if command.amount is None or command.category is None:
+                if command.category_name and not command.category:
+                    await self._executor.prompt_category_resolution(
+                        update,
+                        context,
+                        telegram_user,
+                        command,
+                    )
+                    return
+                await self._executor.send_error(
+                    update,
+                    context,
+                    'Не хватает данных для лимита. Пример: «лимит 5000 продукты».',
+                    voice_transcript=transcript,
+                )
+                return
+            await self._executor.execute_set_budget(
+                update,
+                context,
+                telegram_user,
+                command,
+            )
+            return
 
         if command.amount is None:
             await self._executor.send_error(

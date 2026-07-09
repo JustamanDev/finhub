@@ -8,16 +8,16 @@ from telegram import Update
 from telegram.ext import ContextTypes
 
 from telegram_bot.services.command_executor import CommandExecutor
-from telegram_bot.voice.dialog import VoiceDialogManager, missing_slots_for_create
+from telegram_bot.voice.dialog import (
+    VoiceDialogManager,
+    missing_slots_for_budget,
+    missing_slots_for_create,
+)
 from telegram_bot.voice.intents import ParsedVoiceCommand, VoiceIntentType
 
 logger = logging.getLogger(__name__)
 
 STUB_MESSAGES = {
-    VoiceIntentType.SET_BUDGET: (
-        '🎤 Голосовое управление бюджетами скоро будет доступно.\n'
-        'Пока используй меню «Бюджеты» или настройки категории.'
-    ),
     VoiceIntentType.MANAGE_GOAL: (
         '🎤 Голосовое управление целями скоро будет доступно.\n'
         'Пока используй раздел «Цели» в меню.'
@@ -90,6 +90,51 @@ class VoiceRouter:
                 telegram_user,
                 command.to_executor_dict(),
                 voice_transcript=command.raw_transcript,
+            )
+            return
+
+        if command.intent == VoiceIntentType.SET_BUDGET:
+            if command.should_reject():
+                await self._executor.send_error(
+                    update,
+                    context,
+                    command.error or 'Не понял команду лимита. Попробуй ещё раз.',
+                    voice_transcript=command.raw_transcript,
+                )
+                return
+
+            # Budgets are expense-only.
+            command.transaction_type = 'expense'
+            missing = missing_slots_for_budget(command)
+
+            # Incomplete: no amount, or no category hint at all → dialog.
+            if command.amount is None or (
+                not command.category and not command.category_name
+            ):
+                await self._dialog.start_from_command(
+                    update,
+                    context,
+                    telegram_user,
+                    command,
+                    missing,
+                )
+                return
+
+            # Named but unresolved → picker / create.
+            if not command.category:
+                await self._executor.prompt_category_resolution(
+                    update,
+                    context,
+                    telegram_user,
+                    command,
+                )
+                return
+
+            await self._executor.execute_set_budget(
+                update,
+                context,
+                telegram_user,
+                command,
             )
             return
 

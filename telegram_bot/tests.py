@@ -696,3 +696,157 @@ class VoiceDialogManagerTests(TestCase):
         self.assertEqual(rebuilt.amount, Decimal('50000'))
         self.assertEqual(rebuilt.transaction_type, 'income')
         self.assertEqual(rebuilt.category_name, 'Зарплата')
+
+
+class VoiceBudgetPhase3Tests(TestCase):
+    def setUp(self):
+        from decimal import Decimal
+
+        self.user = User.objects.create_user(
+            username='budget_voice',
+            password='test',
+        )
+        self.products = Category.objects.create(
+            user=self.user,
+            name='Продукты',
+            type='expense',
+            color='#000000',
+            icon='🥕',
+        )
+        self.transport = Category.objects.create(
+            user=self.user,
+            name='Транспорт',
+            type='expense',
+            color='#000000',
+            icon='🚌',
+        )
+        self.salary = Category.objects.create(
+            user=self.user,
+            name='Зарплата',
+            type='income',
+            color='#000000',
+            icon='💰',
+        )
+        self.Decimal = Decimal
+
+    def test_b1_fast_path_limit_with_category(self):
+        from telegram_bot.voice.interpreter import VoiceInterpreter
+        from telegram_bot.voice.intents import VoiceIntentType
+
+        command = VoiceInterpreter(self.user).interpret('лимит 5000 на продукты')
+        self.assertEqual(command.intent, VoiceIntentType.SET_BUDGET)
+        self.assertEqual(command.amount, self.Decimal('5000'))
+        self.assertEqual(command.category.id, self.products.id)
+        self.assertEqual(command.transaction_type, 'expense')
+
+    def test_b2_budget_alias(self):
+        from telegram_bot.voice.interpreter import VoiceInterpreter
+        from telegram_bot.voice.intents import VoiceIntentType
+
+        command = VoiceInterpreter(self.user).interpret('бюджет 10000 еда')
+        self.assertEqual(command.intent, VoiceIntentType.SET_BUDGET)
+        self.assertEqual(command.amount, self.Decimal('10000'))
+        # «еда» may resolve via synonym to cafe/products — amount+intent is enough here
+        self.assertTrue(command.category_name)
+
+    def test_b3_missing_amount_slots(self):
+        from telegram_bot.voice.dialog import missing_slots_for_budget, next_step
+        from telegram_bot.voice.intents import ParsedVoiceCommand, VoiceIntentType
+
+        command = ParsedVoiceCommand(
+            intent=VoiceIntentType.SET_BUDGET,
+            success=True,
+            confidence=1.0,
+            raw_transcript='лимит на транспорт',
+            category=self.transport,
+            category_name='Транспорт',
+            transaction_type='expense',
+            amount=None,
+        )
+        missing = missing_slots_for_budget(command)
+        self.assertEqual(missing, ['amount'])
+        self.assertEqual(next_step(missing), 'awaiting_amount')
+
+    def test_b4_missing_category_slots(self):
+        from telegram_bot.voice.dialog import missing_slots_for_budget, next_step
+        from telegram_bot.voice.intents import ParsedVoiceCommand, VoiceIntentType
+
+        command = ParsedVoiceCommand(
+            intent=VoiceIntentType.SET_BUDGET,
+            success=True,
+            confidence=1.0,
+            raw_transcript='лимит 5000',
+            amount=self.Decimal('5000'),
+            transaction_type='expense',
+        )
+        missing = missing_slots_for_budget(command)
+        self.assertEqual(missing, ['category'])
+        self.assertEqual(next_step(missing), 'awaiting_category')
+
+    def test_b5_upsert_create_and_update(self):
+        from telegram_bot.services.voice_budget_executor import (
+            find_current_month_budget,
+            upsert_monthly_budget,
+        )
+
+        result = upsert_monthly_budget(
+            self.user,
+            self.products,
+            self.Decimal('5000'),
+        )
+        self.assertTrue(result.created)
+        self.assertEqual(result.budget.amount, self.Decimal('5000'))
+        self.assertIsNone(result.previous_amount)
+
+        result2 = upsert_monthly_budget(
+            self.user,
+            self.products,
+            self.Decimal('7000'),
+        )
+        self.assertFalse(result2.created)
+        self.assertEqual(result2.previous_amount, self.Decimal('5000'))
+        self.assertEqual(result2.budget.amount, self.Decimal('7000'))
+        self.assertEqual(
+            find_current_month_budget(self.user, self.products).id,
+            result.budget.id,
+        )
+
+    def test_budget_rejects_income_category(self):
+        from telegram_bot.services.voice_budget_executor import upsert_monthly_budget
+
+        with self.assertRaises(ValueError):
+            upsert_monthly_budget(
+                self.user,
+                self.salary,
+                self.Decimal('1000'),
+            )
+
+    def test_budget_slots_roundtrip(self):
+        from telegram_bot.voice.dialog import command_to_slots, slots_to_command
+        from telegram_bot.voice.intents import ParsedVoiceCommand, VoiceIntentType
+
+        command = ParsedVoiceCommand(
+            intent=VoiceIntentType.SET_BUDGET,
+            success=True,
+            confidence=1.0,
+            raw_transcript='лимит на транспорт',
+            amount=None,
+            category_name='Транспорт',
+            transaction_type='expense',
+        )
+        slots = command_to_slots(command)
+        self.assertEqual(slots['intent'], 'set_budget')
+        slots['amount'] = self.Decimal('3000')
+        rebuilt = slots_to_command(slots, command.raw_transcript)
+        self.assertEqual(rebuilt.intent, VoiceIntentType.SET_BUDGET)
+        self.assertEqual(rebuilt.amount, self.Decimal('3000'))
+        self.assertEqual(rebuilt.category_name, 'Транспорт')
+
+    def test_fast_path_limit_without_amount(self):
+        from telegram_bot.voice.interpreter import VoiceInterpreter
+        from telegram_bot.voice.intents import VoiceIntentType
+
+        command = VoiceInterpreter(self.user).interpret('лимит на транспорт')
+        self.assertEqual(command.intent, VoiceIntentType.SET_BUDGET)
+        self.assertIsNone(command.amount)
+        self.assertEqual(command.category.id, self.transport.id)
