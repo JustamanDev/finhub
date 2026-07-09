@@ -60,6 +60,27 @@ class CallbackHandler(BaseHandler):
                 )
             elif query.data == 'voice_cancel':
                 await self._handle_voice_cancel(query, context)
+            elif query.data.startswith('voice_cat_pick_'):
+                await self._handle_voice_cat_pick(
+                    update,
+                    query,
+                    context,
+                    telegram_user,
+                )
+            elif query.data == 'voice_cat_all':
+                await self._handle_voice_cat_all(
+                    update,
+                    query,
+                    context,
+                    telegram_user,
+                )
+            elif query.data == 'voice_cat_create':
+                await self._handle_voice_cat_create(
+                    update,
+                    query,
+                    context,
+                    telegram_user,
+                )
             elif query.data == 'add_expense':
                 await self._handle_add_expense(
                     query,
@@ -382,6 +403,9 @@ class CallbackHandler(BaseHandler):
             user_state.current_amount = None
             user_state.awaiting_category = False
             await user_state.asave()
+
+            from telegram_bot.services.command_executor import VOICE_CATEGORY_PENDING_KEY
+            context.user_data.pop(VOICE_CATEGORY_PENDING_KEY, None)
             
             # Отправляем подтверждение
             await self._send_transaction_confirmation(
@@ -1693,13 +1717,65 @@ class CallbackHandler(BaseHandler):
             telegram_user,
         )
 
+    async def _handle_voice_cat_pick(
+        self,
+        update: Update,
+        query: CallbackQuery,
+        context: ContextTypes.DEFAULT_TYPE,
+        telegram_user,
+    ) -> None:
+        await query.answer()
+        try:
+            category_id = int(query.data.split('_')[-1])
+        except (ValueError, IndexError):
+            await query.answer('Ошибка данных')
+            return
+        await self._command_executor.apply_voice_category_pick(
+            update,
+            context,
+            telegram_user,
+            category_id,
+        )
+
+    async def _handle_voice_cat_all(
+        self,
+        update: Update,
+        query: CallbackQuery,
+        context: ContextTypes.DEFAULT_TYPE,
+        telegram_user,
+    ) -> None:
+        await query.answer()
+        await self._command_executor.show_voice_all_categories(
+            update,
+            context,
+            telegram_user,
+        )
+
+    async def _handle_voice_cat_create(
+        self,
+        update: Update,
+        query: CallbackQuery,
+        context: ContextTypes.DEFAULT_TYPE,
+        telegram_user,
+    ) -> None:
+        await query.answer()
+        await self._command_executor.start_voice_category_create(
+            update,
+            context,
+            telegram_user,
+        )
+
     async def _handle_voice_cancel(
         self,
         query: CallbackQuery,
         context: ContextTypes.DEFAULT_TYPE,
     ) -> None:
-        from telegram_bot.services.command_executor import VOICE_PENDING_KEY
+        from telegram_bot.services.command_executor import (
+            VOICE_CATEGORY_PENDING_KEY,
+            VOICE_PENDING_KEY,
+        )
 
         context.user_data.pop(VOICE_PENDING_KEY, None)
+        context.user_data.pop(VOICE_CATEGORY_PENDING_KEY, None)
         await query.answer('Отменено')
         await safe_edit_message_text(query, text='❌ Голосовая команда отменена.') 

@@ -293,7 +293,17 @@ class VoiceInterpreter:
 
         category = None
         if category_name:
-            category = self._parser._find_category(category_name, transaction_type)
+            from telegram_bot.voice.category_resolver import (
+                CategoryResolver,
+                ResolveStatus,
+            )
+
+            resolved = CategoryResolver(self.user).resolve(
+                category_name,
+                transaction_type,
+            )
+            if resolved.status == ResolveStatus.MATCHED:
+                category = resolved.match
 
         command_type = 'amount_category' if category_name else 'amount_only'
         return ParsedVoiceCommand(

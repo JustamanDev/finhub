@@ -17,7 +17,7 @@
 
 ## В работе
 
-- [ ] **Voice Assistant v2** — Phase 0 PR pending, план: `docs/agent/voice-assistant-v2.md`
+- [ ] **Voice Assistant v2** — Phase 1 category intelligence, ветка `feature/voice-phase-1-category-intelligence`
 
 ## Недавно завершено
 

@@ -610,6 +610,9 @@ class TextHandler(BaseHandler):
             user_state.last_transaction_type = resolved_category.type
             await user_state.asave()
 
+            from telegram_bot.services.command_executor import VOICE_CATEGORY_PENDING_KEY
+            context.user_data.pop(VOICE_CATEGORY_PENDING_KEY, None)
+
             await self._command_executor.send_transaction_created(
                 update,
                 context,
@@ -803,15 +806,53 @@ class TextHandler(BaseHandler):
                 category_type=normalized_type,
                 icon=icon,
             )
-            
-            # Сбрасываем состояние
+
+            voice_create_after = bool(
+                (user_state.context_data or {}).get('voice_create_after'),
+            )
+            pending_amount = user_state.current_amount
+
+            # Сбрасываем состояние создания категории
             user_state.awaiting_category_creation = False
             user_state.context_data = {}
             await user_state.asave()
-            
+
             logger.info(f"Категория создана успешно: {category.name} ({category.type})")
-            
-            # Отправляем подтверждение
+
+            if voice_create_after and pending_amount is not None:
+                from telegram_bot.services.command_executor import (
+                    VOICE_CATEGORY_PENDING_KEY,
+                )
+
+                context.user_data.pop(VOICE_CATEGORY_PENDING_KEY, None)
+                try:
+                    transaction = await TransactionService(user).create_transaction(
+                        amount=pending_amount,
+                        category=category,
+                        transaction_type=category.type,
+                    )
+                    user_state.current_amount = None
+                    user_state.awaiting_category = False
+                    user_state.last_transaction_type = category.type
+                    await user_state.asave()
+                    await self._command_executor.send_transaction_created(
+                        update,
+                        context,
+                        transaction,
+                        voice_transcript=text,
+                    )
+                    return
+                except Exception as exc:
+                    logger.error('Voice create-after transaction error: %s', exc)
+                    await self._command_executor.send_error(
+                        update,
+                        context,
+                        f'Категория создана, но транзакция не записана: {exc}',
+                        voice_transcript=text,
+                    )
+                    return
+
+            # Отправляем подтверждение (обычный settings flow)
             type_name = "доходов" if normalized_type == "income" else "расходов"
             display_name = category.name
             message = (
