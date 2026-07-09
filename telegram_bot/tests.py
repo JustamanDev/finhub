@@ -1005,3 +1005,118 @@ class VoiceGoalPhase4Tests(TestCase):
         self.assertEqual(rebuilt.goal_action, GOAL_ACTION_DEPOSIT)
         self.assertEqual(rebuilt.amount, self.Decimal('2500'))
 
+
+class NumberWordsTests(TestCase):
+    def test_parse_simple(self):
+        from decimal import Decimal
+
+        from telegram_bot.voice.number_words import parse_number_words
+
+        self.assertEqual(parse_number_words('триста'), Decimal('300'))
+        self.assertEqual(parse_number_words('пятьсот'), Decimal('500'))
+        self.assertEqual(parse_number_words('две тысячи'), Decimal('2000'))
+        self.assertEqual(
+            parse_number_words('две тысячи пятьсот'),
+            Decimal('2500'),
+        )
+        self.assertEqual(parse_number_words('50 тысяч'), Decimal('50000'))
+        self.assertEqual(
+            parse_number_words('полтора миллиона'),
+            Decimal('1500000'),
+        )
+        self.assertEqual(parse_number_words('1.5 млн'), Decimal('1500000'))
+
+    def test_replace_in_phrase(self):
+        from telegram_bot.voice.number_words import replace_spoken_numbers
+
+        self.assertEqual(
+            replace_spoken_numbers('пятьсот продукты'),
+            '500 продукты',
+        )
+        self.assertEqual(
+            replace_spoken_numbers('потратил триста на еду'),
+            'потратил 300 на еду',
+        )
+        self.assertEqual(
+            replace_spoken_numbers('лимит пять тысяч на транспорт'),
+            'лимит 5000 на транспорт',
+        )
+
+    def test_interpreter_spoken_amount(self):
+        from decimal import Decimal
+
+        from telegram_bot.voice.interpreter import VoiceInterpreter
+        from telegram_bot.voice.intents import VoiceIntentType
+
+        user = User.objects.create_user(username='spoken_num', password='x')
+        category = Category.objects.create(
+            user=user,
+            name='Продукты',
+            type='expense',
+            color='#000000',
+            icon='🥕',
+        )
+        command = VoiceInterpreter(user).interpret('пятьсот продукты')
+        self.assertEqual(command.intent, VoiceIntentType.CREATE_TRANSACTION)
+        self.assertEqual(command.amount, Decimal('500'))
+        self.assertEqual(command.category.id, category.id)
+
+
+class VoiceWhisperContextTests(TestCase):
+    def test_build_prompt_includes_categories(self):
+        from telegram_bot.voice.whisper_context import build_user_whisper_prompt
+
+        user = User.objects.create_user(username='whisper_ctx', password='x')
+        Category.objects.create(
+            user=user,
+            name='Продукты',
+            type='expense',
+            color='#000000',
+            icon='🥕',
+        )
+        prompt = build_user_whisper_prompt(user)
+        self.assertIn('Продукты', prompt)
+
+
+class VoiceRouterMockE2ETests(TestCase):
+    """Lightweight routing checks without OpenAI (mock interpret path)."""
+
+    def setUp(self):
+        from decimal import Decimal
+
+        self.Decimal = Decimal
+        self.user = User.objects.create_user(username='e2e_voice', password='x')
+        self.telegram_user = TelegramUser.objects.create(
+            telegram_id=999001,
+            user=self.user,
+            username='e2e_voice',
+        )
+        self.products = Category.objects.create(
+            user=self.user,
+            name='Продукты',
+            type='expense',
+            color='#000000',
+            icon='🥕',
+        )
+
+    def test_interpret_then_missing_slots_for_unknown_category(self):
+        from telegram_bot.voice.dialog import missing_slots_for_create
+        from telegram_bot.voice.interpreter import VoiceInterpreter
+        from telegram_bot.voice.intents import VoiceIntentType
+
+        command = VoiceInterpreter(self.user).interpret('500 абракадабра')
+        self.assertEqual(command.intent, VoiceIntentType.CREATE_TRANSACTION)
+        self.assertEqual(command.amount, self.Decimal('500'))
+        self.assertIsNone(command.category)
+        self.assertIn('category', missing_slots_for_create(command))
+
+    def test_budget_spoken_number_fast_path(self):
+        from telegram_bot.voice.interpreter import VoiceInterpreter
+        from telegram_bot.voice.intents import VoiceIntentType
+
+        command = VoiceInterpreter(self.user).interpret(
+            'лимит пять тысяч на продукты',
+        )
+        self.assertEqual(command.intent, VoiceIntentType.SET_BUDGET)
+        self.assertEqual(command.amount, self.Decimal('5000'))
+        self.assertEqual(command.category.id, self.products.id)
