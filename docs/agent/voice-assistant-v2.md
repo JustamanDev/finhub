@@ -348,11 +348,15 @@ voice_dialog = {
 
 ### Phase 5 — Hardening (ongoing)
 
-- [ ] Spoken numbers (`number_words.py`)
-- [ ] Metrics: transcribe_ms, llm_ms, auto_save_rate, clarification_rate
-- [ ] E2E tests (mock Whisper/LLM)
-- [ ] Prompt tuning per-user categories (Whisper `WHISPER_PROMPT`)
+- [x] Spoken numbers (`number_words.py`)
+- [x] Metrics: transcribe_ms, llm_ms, auto_save / clarification route events
+- [x] E2E-ish unit tests (spoken numbers + unknown category slots; no live OpenAI)
+- [x] Prompt tuning per-user categories (Whisper prompt via `whisper_context.py`)
 - [ ] ASK_ADVISOR — отдельный эпик (не блокирует v2)
+
+**PR:** `feature/voice-phase-5-hardening`
+
+**Критерий:** «пятьсот продукты» → regex; metrics в логах; Whisper bias по категориям.
 
 ---
 

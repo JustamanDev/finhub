@@ -18,6 +18,8 @@ from telegram_bot.voice.intents import (
     ParsedVoiceCommand,
     VoiceIntentType,
 )
+from telegram_bot.voice.metrics import log_voice_event, timed_ms
+from telegram_bot.voice.number_words import replace_spoken_numbers
 
 logger = logging.getLogger(__name__)
 
@@ -159,10 +161,17 @@ def _compact_natural_income_phrase(text: str) -> str | None:
 
 def voice_text_parse_candidates(text: str) -> list[str]:
     """Candidate strings for parsing voice-derived text in text flows."""
+    from telegram_bot.voice.number_words import replace_spoken_numbers
+
     candidates = [text]
+    expanded = replace_spoken_numbers(text)
+    if expanded and expanded not in candidates:
+        candidates.append(expanded)
     for compact in (
         _compact_natural_phrase(text),
         _compact_natural_income_phrase(text),
+        _compact_natural_phrase(expanded) if expanded != text else None,
+        _compact_natural_income_phrase(expanded) if expanded != text else None,
     ):
         if compact and compact not in candidates:
             candidates.append(compact)
@@ -185,12 +194,39 @@ class VoiceInterpreter:
                 error='Пустая транскрипция.',
             )
 
-        fast = self._try_regex_fast_path(text)
-        if fast:
-            return fast
+        expanded = replace_spoken_numbers(text)
+        # Prefer digit-expanded form first so «лимит пять тысяч …» hits budget regex.
+        candidates = []
+        if expanded != text:
+            candidates.append(expanded)
+        candidates.append(text)
+
+        for candidate in candidates:
+            fast = self._try_regex_fast_path(candidate)
+            if fast:
+                fast.raw_transcript = text
+                log_voice_event(
+                    'interpret',
+                    path='regex',
+                    intent=fast.intent.value,
+                    spoken_numbers=int(expanded != text),
+                )
+                return fast
 
         logger.info('Voice LLM fallback for transcript: %r', text)
-        return self._interpret_with_llm(text)
+        with timed_ms() as timing:
+            command = self._interpret_with_llm(expanded if expanded != text else text)
+        if command.raw_transcript != text:
+            command.raw_transcript = text
+        log_voice_event(
+            'interpret',
+            path='llm',
+            intent=command.intent.value,
+            llm_ms=timing.get('ms'),
+            spoken_numbers=int(expanded != text),
+            confidence=round(command.confidence, 3),
+        )
+        return command
 
     def _try_regex_fast_path(self, text: str) -> ParsedVoiceCommand | None:
         budget = self._try_budget_fast_path(text)

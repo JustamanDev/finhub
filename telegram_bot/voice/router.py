@@ -21,6 +21,7 @@ from telegram_bot.voice.intents import (
     ParsedVoiceCommand,
     VoiceIntentType,
 )
+from telegram_bot.voice.metrics import log_voice_event
 
 logger = logging.getLogger(__name__)
 
@@ -59,6 +60,12 @@ class VoiceRouter:
                 slot for slot in missing if slot in ('amount', 'transaction_type')
             ]
             if dialog_slots:
+                log_voice_event(
+                    'route',
+                    intent=command.intent.value,
+                    outcome='clarification',
+                    missing=','.join(dialog_slots),
+                )
                 await self._dialog.start_from_command(
                     update,
                     context,
@@ -70,6 +77,12 @@ class VoiceRouter:
 
             # Named category not resolved → disambiguate / create offer.
             if 'category' in missing:
+                log_voice_event(
+                    'route',
+                    intent=command.intent.value,
+                    outcome='clarification',
+                    missing='category',
+                )
                 await self._executor.prompt_category_resolution(
                     update,
                     context,
@@ -79,6 +92,11 @@ class VoiceRouter:
                 return
 
             if command.needs_confirmation():
+                log_voice_event(
+                    'route',
+                    intent=command.intent.value,
+                    outcome='confirm',
+                )
                 await self._executor.prompt_voice_confirmation(
                     update,
                     context,
@@ -87,6 +105,11 @@ class VoiceRouter:
                 )
                 return
 
+            log_voice_event(
+                'route',
+                intent=command.intent.value,
+                outcome='auto_save',
+            )
             await self._executor.execute_create_transaction(
                 update,
                 context,
@@ -114,6 +137,11 @@ class VoiceRouter:
             if command.amount is None or (
                 not command.category and not command.category_name
             ):
+                log_voice_event(
+                    'route',
+                    intent=command.intent.value,
+                    outcome='clarification',
+                )
                 await self._dialog.start_from_command(
                     update,
                     context,
@@ -125,6 +153,12 @@ class VoiceRouter:
 
             # Named but unresolved → picker / create.
             if not command.category:
+                log_voice_event(
+                    'route',
+                    intent=command.intent.value,
+                    outcome='clarification',
+                    missing='category',
+                )
                 await self._executor.prompt_category_resolution(
                     update,
                     context,
@@ -133,6 +167,11 @@ class VoiceRouter:
                 )
                 return
 
+            log_voice_event(
+                'route',
+                intent=command.intent.value,
+                outcome='auto_save',
+            )
             await self._executor.execute_set_budget(
                 update,
                 context,
@@ -177,6 +216,11 @@ class VoiceRouter:
                 and not command.goal
                 and not command.goal_title
             ):
+                log_voice_event(
+                    'route',
+                    intent=command.intent.value,
+                    outcome='clarification',
+                )
                 await self._dialog.start_from_command(
                     update,
                     context,
@@ -194,6 +238,12 @@ class VoiceRouter:
                 }
                 and not command.goal
             ):
+                log_voice_event(
+                    'route',
+                    intent=command.intent.value,
+                    outcome='clarification',
+                    missing='goal',
+                )
                 await self._executor.prompt_goal_resolution(
                     update,
                     context,
@@ -202,6 +252,11 @@ class VoiceRouter:
                 )
                 return
 
+            log_voice_event(
+                'route',
+                intent=command.intent.value,
+                outcome='auto_save',
+            )
             await self._executor.execute_manage_goal(
                 update,
                 context,

@@ -30,8 +30,10 @@ from telegram_bot.voice.dialog import (
 )
 from telegram_bot.voice.interpreter import VoiceInterpreter
 from telegram_bot.voice.intents import ParsedVoiceCommand
+from telegram_bot.voice.metrics import log_voice_event, timed_ms
 from telegram_bot.voice.router import VoiceRouter
 from telegram_bot.voice.transcription import TranscriptionError, transcribe
+from telegram_bot.voice.whisper_context import build_user_whisper_prompt
 
 logger = logging.getLogger(__name__)
 
@@ -99,8 +101,22 @@ class VoiceHandler(BaseHandler):
                 context.bot,
                 incoming,
             )
-            transcript = await asyncio.to_thread(transcribe, audio_path)
+            user = await sync_to_async(lambda: telegram_user.user)()
+            whisper_hint = await sync_to_async(build_user_whisper_prompt)(user)
+
+            with timed_ms() as transcribe_timing:
+                transcript = await asyncio.to_thread(
+                    transcribe,
+                    audio_path,
+                    prompt=whisper_hint or None,
+                )
             clean_transcript = transcript.strip()
+            log_voice_event(
+                'transcribe',
+                transcribe_ms=transcribe_timing.get('ms'),
+                chars=len(clean_transcript),
+                user_id=user.id,
+            )
             if not clean_transcript:
                 await status_message.edit_text(
                     '❌ Не удалось распознать речь. Попробуйте ещё раз.',
@@ -137,6 +153,7 @@ class VoiceHandler(BaseHandler):
                         text='⏱ Диалог устарел. Отправьте команду заново.',
                     )
                     return
+                log_voice_event('dialog_continue', user_id=user.id)
                 await self._dialog.continue_dialog(
                     update,
                     context,
@@ -158,8 +175,6 @@ class VoiceHandler(BaseHandler):
                     ),
                 )
                 return
-
-            user = await sync_to_async(lambda: telegram_user.user)()
 
             def _interpret() -> ParsedVoiceCommand:
                 return VoiceInterpreter(user).interpret(clean_transcript)
