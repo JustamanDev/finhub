@@ -284,7 +284,7 @@ voice_dialog = {
 - [x] `voice_pending` guard: не перезаписывать без отмены
 - [x] Тесты на регрессии
 
-**PR:** #TBD — `feature/voice-phase-0-bugfix`
+**PR:** #30 — `feature/voice-phase-0-bugfix` (merged)
 
 **Критерий готовности:** E1–E4, I1–I2, G3–G4, B6, L2 работают стабильно.
 
@@ -292,12 +292,14 @@ voice_dialog = {
 
 **Цель:** несуществующая/неоднозначная категория → умное уточнение.
 
-- [ ] `CategoryResolver` service
-- [ ] Disambiguation UI (top-3 + «все категории»)
-- [ ] «Имели в виду …?» confirm callback
-- [ ] Offer create category (reuse `awaiting_category_creation` flow)
-- [ ] Расширить synonym map из `DefaultCategoryTemplate`
-- [ ] Тесты: exact, fuzzy, unknown, ambiguous
+- [x] `CategoryResolver` service
+- [x] Disambiguation UI (top-3 + «все категории»)
+- [x] «Имели в виду …?» confirm callback (`voice_cat_pick_*`)
+- [x] Offer create category (reuse `awaiting_category_creation` + auto tx)
+- [x] Расширить synonym map (default templates + legacy)
+- [x] Тесты: exact, fuzzy, unknown, ambiguous
+
+**PR:** `feature/voice-phase-1-category-intelligence`
 
 **Критерий:** E5, E6, сценарий §3.6 закрыт.
 

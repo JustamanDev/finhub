@@ -279,51 +279,16 @@ class TextCommandParser:
         transaction_type: str,
     ) -> Optional[Category]:
         """
-        Поиск категории по имени (без учета регистра)
-        
-        Args:
-            name: Название категории для поиска
-            transaction_type: Тип транзакции ('expense' или 'income')
-            
-        Returns:
-            Найденная категория или None
+        Поиск категории по имени (exact / synonym / fuzzy auto-pick).
+
+        Ambiguous matches return None — caller should offer disambiguation.
         """
-        # Приводим к нижнему регистру для поиска
-        name_lower = name.lower().strip()
-        
-        categories = Category.objects.filter(
-            user=self.user,
-            type=transaction_type,
+        from telegram_bot.voice.category_resolver import (
+            CategoryResolver,
+            ResolveStatus,
         )
-        
-        # Синонимы для категорий
-        category_synonyms = {
-            'еда': ['продукты', 'еда', 'питание', 'пища', 'кухня'],
-            'жилье': ['жилье', 'дом', 'квартира', 'аренда', 'коммунальные'],
-            'здоровье': ['здоровье', 'медицина', 'врач', 'лекарства', 'аптека'],
-            'кофе': ['кофе', 'кафе', 'кофейня', 'напитки'],
-            'одежда': ['одежда', 'вещи', 'магазин', 'шопинг'],
-            'развлечения': ['развлечения', 'кино', 'театр', 'ресторан', 'бар'],
-            'техника': ['техника', 'электроника', 'гаджеты', 'компьютер'],
-            'транспорт': ['транспорт', 'такси', 'метро', 'автобус', 'машина'],
-        }
-        
-        # Используем Python-логику для поиска
-        for category in categories:
-            category_name_lower = category.name.lower()
-            
-            # Точное совпадение
-            if category_name_lower == name_lower:
-                return category
-            
-            # Частичное совпадение
-            if name_lower in category_name_lower or category_name_lower in name_lower:
-                return category
-            
-            # Поиск по синонимам
-            if category_name_lower in category_synonyms:
-                synonyms = category_synonyms[category_name_lower]
-                if name_lower in synonyms:
-                    return category
-        
+
+        result = CategoryResolver(self.user).resolve(name, transaction_type)
+        if result.status == ResolveStatus.MATCHED:
+            return result.match
         return None 

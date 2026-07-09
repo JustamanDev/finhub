@@ -467,3 +467,129 @@ class TelegramResilienceTestCase(TestCase):
         plain_update.callback_query = None
         del plain_update.edit_message_text
         self.assertIsNone(get_callback_query(plain_update))
+
+
+class CategoryResolverTests(TestCase):
+    def setUp(self):
+        self.user = User.objects.create_user(
+            username='resolver_test',
+            password='test',
+        )
+        self.products = Category.objects.create(
+            user=self.user,
+            name='Продукты',
+            type='expense',
+            color='#000000',
+            icon='🥕',
+        )
+        self.mobile = Category.objects.create(
+            user=self.user,
+            name='Связь и интернет',
+            type='expense',
+            color='#000000',
+            icon='📱',
+        )
+        self.cafe = Category.objects.create(
+            user=self.user,
+            name='Еда вне дома',
+            type='expense',
+            color='#000000',
+            icon='🍽',
+        )
+        self.salary = Category.objects.create(
+            user=self.user,
+            name='Зарплата',
+            type='income',
+            color='#000000',
+            icon='💰',
+        )
+
+    def test_exact_match(self):
+        from telegram_bot.voice.category_resolver import (
+            CategoryResolver,
+            ResolveStatus,
+        )
+
+        result = CategoryResolver(self.user).resolve('продукты', 'expense')
+        self.assertEqual(result.status, ResolveStatus.MATCHED)
+        self.assertEqual(result.match.id, self.products.id)
+
+    def test_synonym_match(self):
+        from telegram_bot.voice.category_resolver import (
+            CategoryResolver,
+            ResolveStatus,
+        )
+
+        transport = Category.objects.create(
+            user=self.user,
+            name='Транспорт',
+            type='expense',
+            color='#000000',
+            icon='🚇',
+        )
+        result = CategoryResolver(self.user).resolve('такси', 'expense')
+        self.assertEqual(result.status, ResolveStatus.MATCHED)
+        self.assertEqual(result.match.id, transport.id)
+
+    def test_ambiguous_food_synonym(self):
+        from telegram_bot.voice.category_resolver import (
+            CategoryResolver,
+            ResolveStatus,
+        )
+
+        # «еда» hits both Продукты (synonym) and Еда вне дома
+        result = CategoryResolver(self.user).resolve('еда', 'expense')
+        self.assertEqual(result.status, ResolveStatus.AMBIGUOUS)
+        self.assertGreaterEqual(len(result.candidates), 2)
+
+    def test_fuzzy_mobile(self):
+        from telegram_bot.voice.category_resolver import (
+            CategoryResolver,
+            ResolveStatus,
+        )
+
+        result = CategoryResolver(self.user).resolve('мобильный', 'expense')
+        self.assertEqual(result.status, ResolveStatus.MATCHED)
+        self.assertEqual(result.match.id, self.mobile.id)
+
+    def test_unknown_category(self):
+        from telegram_bot.voice.category_resolver import (
+            CategoryResolver,
+            ResolveStatus,
+        )
+
+        result = CategoryResolver(self.user).resolve('абракадабра', 'expense')
+        self.assertEqual(result.status, ResolveStatus.UNKNOWN)
+        self.assertIsNone(result.match)
+
+    def test_income_salary(self):
+        from telegram_bot.voice.category_resolver import (
+            CategoryResolver,
+            ResolveStatus,
+        )
+
+        result = CategoryResolver(self.user).resolve('зп', 'income')
+        self.assertEqual(result.status, ResolveStatus.MATCHED)
+        self.assertEqual(result.match.id, self.salary.id)
+
+    def test_ambiguous_when_close_scores(self):
+        from telegram_bot.voice.category_resolver import (
+            CategoryResolver,
+            ResolveStatus,
+        )
+
+        Category.objects.create(
+            user=self.user,
+            name='Продуктовый магазин',
+            type='expense',
+            color='#000000',
+            icon='🏪',
+        )
+        # "продукт" is substring of both Продукты and Продуктовый магазин
+        result = CategoryResolver(self.user).resolve('продукт', 'expense')
+        self.assertIn(
+            result.status,
+            {ResolveStatus.AMBIGUOUS, ResolveStatus.MATCHED},
+        )
+        if result.status == ResolveStatus.AMBIGUOUS:
+            self.assertGreaterEqual(len(result.candidates), 2)

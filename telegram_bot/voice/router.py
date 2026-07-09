@@ -49,6 +49,20 @@ class VoiceRouter:
                 )
                 return
 
+            # Named category not resolved → disambiguate / create offer (no binary confirm).
+            if (
+                command.command_type == 'amount_category'
+                and command.category_name
+                and not command.category
+            ):
+                await self._executor.prompt_category_resolution(
+                    update,
+                    context,
+                    telegram_user,
+                    command,
+                )
+                return
+
             if command.needs_confirmation():
                 await self._executor.prompt_voice_confirmation(
                     update,
