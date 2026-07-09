@@ -428,6 +428,15 @@ class TextHandler(BaseHandler):
             # Проверяем, ожидается ли создание категории
             user_state = await self.get_user_state(telegram_user)
 
+            if user_state.awaiting_category_creation:
+                await self._handle_category_creation(
+                    update,
+                    context,
+                    telegram_user,
+                    message_text,
+                )
+                return
+
             if user_state.awaiting_category and user_state.current_amount:
                 await self._handle_awaiting_category_input(
                     update,
@@ -435,15 +444,6 @@ class TextHandler(BaseHandler):
                     telegram_user,
                     message_text,
                     user_state,
-                )
-                return
-            
-            if user_state.awaiting_category_creation:
-                await self._handle_category_creation(
-                    update,
-                    context,
-                    telegram_user,
-                    message_text,
                 )
                 return
             
@@ -578,12 +578,18 @@ class TextHandler(BaseHandler):
                 )
 
         if not resolved_category:
+            picker_type = transaction_type
+            if parsed.get('success') and parsed.get('type') == 'amount_category':
+                picker_type = parsed.get('transaction_type') or transaction_type
+            user_state.current_amount = tx_amount
+            user_state.last_transaction_type = picker_type
+            await user_state.asave()
             await self._command_executor.send_category_selection(
                 update,
                 context,
                 telegram_user,
-                amount,
-                transaction_type,
+                tx_amount,
+                picker_type,
                 prefix_message=f"Категория '{lookup_name}' не найдена.",
                 voice_transcript=message_text,
             )
