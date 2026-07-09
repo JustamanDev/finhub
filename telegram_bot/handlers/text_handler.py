@@ -11,6 +11,7 @@ from telegram_bot.services.command_executor import CommandExecutor
 from telegram_bot.services.transaction_service import TransactionService
 from telegram_bot.services.category_management_service import CategoryManagementService
 from telegram_bot.services.goal_service import GoalService
+from telegram_bot.voice.interpreter import voice_text_parse_candidates
 from budgets.models import Budget
 from categories.models import Category
 from datetime import datetime as _dt
@@ -46,10 +47,11 @@ class TextHandler(BaseHandler):
         update: Update,
         context: ContextTypes.DEFAULT_TYPE,
         telegram_user,
+        message_text: str,
     ) -> None:
         step = context.user_data.get('goal_creation_step')
         data = context.user_data.get('goal_creation_data', {})
-        text = update.message.text.strip()
+        text = message_text.strip()
 
         from telegram_bot.keyboards.goals import GoalsKeyboard
         from decimal import InvalidOperation
@@ -194,11 +196,12 @@ class TextHandler(BaseHandler):
         context: ContextTypes.DEFAULT_TYPE,
         telegram_user,
         goal_id: int,
+        message_text: str,
     ) -> None:
         from telegram_bot.handlers.goals_handler import GoalsHandler
 
         try:
-            amount = self._parse_money(update.message.text)
+            amount = self._parse_money(message_text)
             if amount <= 0:
                 raise ValueError("amount<=0")
             user = await sync_to_async(lambda: telegram_user.user)()
@@ -221,11 +224,12 @@ class TextHandler(BaseHandler):
         context: ContextTypes.DEFAULT_TYPE,
         telegram_user,
         goal_id: int,
+        message_text: str,
     ) -> None:
         from telegram_bot.handlers.goals_handler import GoalsHandler
 
         try:
-            amount = self._parse_money(update.message.text)
+            amount = self._parse_money(message_text)
             if amount <= 0:
                 raise ValueError("amount<=0")
             user = await sync_to_async(lambda: telegram_user.user)()
@@ -258,10 +262,16 @@ class TextHandler(BaseHandler):
             message_text = context.user_data.pop(
                 '_voice_text_override',
                 None,
-            ) or update.message.text
-
-            # Логируем входящее сообщение для отладки
-            logger.info(f"Получено текстовое сообщение: {message_text}")
+            )
+            if message_text is None:
+                message_text = update.message.text or ''
+            message_text = message_text.strip()
+            if not message_text:
+                await context.bot.send_message(
+                    chat_id=update.effective_chat.id,
+                    text='❌ Пустое сообщение. Введите текст или отправьте голос ещё раз.',
+                )
+                return
             
             # Получаем пользователя
             telegram_user = await self.get_or_create_telegram_user(
@@ -285,17 +295,34 @@ class TextHandler(BaseHandler):
             # --- Цели: создание / пополнение / снятие ---
             goal_creation_step = context.user_data.get('goal_creation_step')
             if goal_creation_step:
-                await self._handle_goal_creation_input(update, context, telegram_user)
+                await self._handle_goal_creation_input(
+                    update,
+                    context,
+                    telegram_user,
+                    message_text,
+                )
                 return
 
             if context.user_data.get('goal_deposit_goal_id'):
                 goal_id = context.user_data.get('goal_deposit_goal_id')
-                await self._handle_goal_deposit_input(update, context, telegram_user, goal_id)
+                await self._handle_goal_deposit_input(
+                    update,
+                    context,
+                    telegram_user,
+                    goal_id,
+                    message_text,
+                )
                 return
 
             if context.user_data.get('goal_withdraw_goal_id'):
                 goal_id = context.user_data.get('goal_withdraw_goal_id')
-                await self._handle_goal_withdraw_input(update, context, telegram_user, goal_id)
+                await self._handle_goal_withdraw_input(
+                    update,
+                    context,
+                    telegram_user,
+                    goal_id,
+                    message_text,
+                )
                 return
             
             # --- Обработка состояний редактирования (дата/комментарий) ---
@@ -401,7 +428,7 @@ class TextHandler(BaseHandler):
 
             # Проверяем, ожидается ли создание категории
             user_state = await self.get_user_state(telegram_user)
-            
+
             if user_state.awaiting_category_creation:
                 await self._handle_category_creation(
                     update,
@@ -410,8 +437,8 @@ class TextHandler(BaseHandler):
                     message_text,
                 )
                 return
-            
-            # Проверяем, ожидается ли ввод суммы лимита
+
+            # Wizard flows take priority over stale awaiting_category state.
             if 'limit_creation' in context.user_data:
                 await self._handle_limit_amount_input(
                     update,
@@ -420,14 +447,23 @@ class TextHandler(BaseHandler):
                     message_text,
                 )
                 return
-            
-            # Проверяем, ожидается ли ввод суммы бюджета
+
             if context.user_data.get('waiting_for_budget_amount'):
                 await self._handle_budget_amount_input(
                     update,
                     context,
                     telegram_user,
                     message_text,
+                )
+                return
+
+            if user_state.awaiting_category and user_state.current_amount:
+                await self._handle_awaiting_category_input(
+                    update,
+                    context,
+                    telegram_user,
+                    message_text,
+                    user_state,
                 )
                 return
             
@@ -486,6 +522,108 @@ class TextHandler(BaseHandler):
         except Exception as e:
             logger.error(f"❌ Ошибка в handle_text_message: {e}")
             await self.handle_error(update, context, e)
+    
+    async def _handle_awaiting_category_input(
+        self,
+        update: Update,
+        context: ContextTypes.DEFAULT_TYPE,
+        telegram_user,
+        message_text: str,
+        user_state,
+    ) -> None:
+        """Завершает amount_only flow: пользователь назвал категорию текстом/голосом."""
+        user = await sync_to_async(lambda: telegram_user.user)()
+        parser = await sync_to_async(self.get_parser)(user)
+        transaction_type = user_state.last_transaction_type or 'expense'
+        amount = user_state.current_amount
+        raw_text = message_text.strip()
+
+        parsed: dict = {'success': False}
+        for candidate in voice_text_parse_candidates(raw_text):
+            parsed = await sync_to_async(parser.parse)(candidate)
+            if parsed.get('success'):
+                break
+        if parsed.get('success') and parsed.get('type') == 'amount_only':
+            user_state.current_amount = parsed['amount']
+            if parsed.get('transaction_type'):
+                user_state.last_transaction_type = parsed['transaction_type']
+                transaction_type = parsed['transaction_type']
+            await user_state.asave()
+            await self._command_executor.send_category_selection(
+                update,
+                context,
+                telegram_user,
+                user_state.current_amount,
+                transaction_type,
+                voice_transcript=message_text,
+            )
+            return
+
+        lookup_name = raw_text
+        resolved_category = None
+        tx_amount = amount
+
+        if parsed.get('success') and parsed.get('type') == 'amount_category':
+            lookup_name = parsed.get('category_name') or raw_text
+            if parsed.get('category'):
+                resolved_category = parsed['category']
+            if parsed.get('amount') is not None and parsed['amount'] != amount:
+                tx_amount = parsed['amount']
+
+        if not resolved_category:
+            resolved_category = await sync_to_async(parser._find_category)(
+                lookup_name,
+                transaction_type,
+            )
+            if not resolved_category:
+                resolved_category = await sync_to_async(parser._find_category)(
+                    lookup_name,
+                    'income' if transaction_type == 'expense' else 'expense',
+                )
+
+        if not resolved_category:
+            picker_type = transaction_type
+            if parsed.get('success') and parsed.get('type') == 'amount_category':
+                picker_type = parsed.get('transaction_type') or transaction_type
+            user_state.current_amount = tx_amount
+            user_state.last_transaction_type = picker_type
+            await user_state.asave()
+            await self._command_executor.send_category_selection(
+                update,
+                context,
+                telegram_user,
+                tx_amount,
+                picker_type,
+                prefix_message=f"Категория '{lookup_name}' не найдена.",
+                voice_transcript=message_text,
+            )
+            return
+
+        try:
+            transaction = await TransactionService(user).create_transaction(
+                amount=tx_amount,
+                category=resolved_category,
+                transaction_type=resolved_category.type,
+            )
+            user_state.current_amount = None
+            user_state.awaiting_category = False
+            user_state.last_transaction_type = resolved_category.type
+            await user_state.asave()
+
+            await self._command_executor.send_transaction_created(
+                update,
+                context,
+                transaction,
+                voice_transcript=message_text,
+            )
+        except Exception as exc:
+            logger.error('Awaiting category transaction error: %s', exc)
+            await self._command_executor.send_error(
+                update,
+                context,
+                f'Ошибка создания транзакции: {exc}',
+                voice_transcript=message_text,
+            )
     
     async def _handle_amount_category(
         self,

@@ -282,6 +282,33 @@ class ParsedVoiceCommandTests(TestCase):
         )
         self.assertTrue(command.should_reject())
 
+    def test_amount_only_skips_confirmation(self):
+        command = ParsedVoiceCommand(
+            intent=VoiceIntentType.CREATE_TRANSACTION,
+            success=True,
+            confidence=1.0,
+            raw_transcript='500',
+            amount=Decimal('500'),
+            transaction_type='expense',
+            command_type='amount_only',
+        )
+        self.assertFalse(command.needs_confirmation())
+
+    def test_to_executor_dict_includes_description(self):
+        command = ParsedVoiceCommand(
+            intent=VoiceIntentType.CREATE_TRANSACTION,
+            success=True,
+            confidence=1.0,
+            raw_transcript='500 кофе',
+            amount=Decimal('500'),
+            transaction_type='expense',
+            category_name='Кафе',
+            description='утром',
+            command_type='amount_category',
+        )
+        payload = command.to_executor_dict()
+        self.assertEqual(payload['description'], 'утром')
+
 
 class VoiceInterpreterRegexTests(TestCase):
     def setUp(self):
@@ -321,6 +348,34 @@ class VoiceInterpreterRegexTests(TestCase):
         self.assertEqual(command.confidence, 1.0)
         self.assertEqual(command.amount, Decimal('500'))
         self.assertEqual(command.category.id, mobile.id)
+
+    def test_fast_path_income_natural_phrase(self):
+        salary = Category.objects.create(
+            user=self.user,
+            name='Зарплата',
+            type='income',
+            color='#000000',
+            icon='💰',
+        )
+        interpreter = VoiceInterpreter(self.user)
+        command = interpreter.interpret('получил 5000 зарплата')
+        self.assertEqual(command.intent, VoiceIntentType.CREATE_TRANSACTION)
+        self.assertEqual(command.confidence, 1.0)
+        self.assertEqual(command.amount, Decimal('5000'))
+        self.assertEqual(command.transaction_type, 'income')
+        self.assertEqual(command.category.id, salary.id)
+
+    def test_compact_natural_income_phrase(self):
+        from telegram_bot.voice.interpreter import _compact_natural_income_phrase
+
+        self.assertEqual(
+            _compact_natural_income_phrase('получил 5000 зарплата'),
+            '+5000 зарплата',
+        )
+        self.assertEqual(
+            _compact_natural_income_phrase('зарплата 5000'),
+            '+5000',
+        )
 
     def test_compact_natural_phrase(self):
         from telegram_bot.voice.interpreter import _compact_natural_phrase

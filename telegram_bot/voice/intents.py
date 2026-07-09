@@ -41,6 +41,8 @@ class ParsedVoiceCommand:
             return False
         if self.intent != VoiceIntentType.CREATE_TRANSACTION:
             return False
+        if self.command_type == 'amount_only':
+            return False
         if self.confidence < CONFIDENCE_CONFIRM:
             return False
         if self.confidence >= CONFIDENCE_AUTO_SAVE and self.category:
@@ -57,6 +59,7 @@ class ParsedVoiceCommand:
                 'type': 'amount_only',
                 'amount': self.amount,
                 'transaction_type': self.transaction_type,
+                'description': self.description,
                 'success': True,
             }
         return {
@@ -65,5 +68,6 @@ class ParsedVoiceCommand:
             'category_name': self.category_name,
             'transaction_type': self.transaction_type,
             'category': self.category,
+            'description': self.description,
             'success': True,
         }

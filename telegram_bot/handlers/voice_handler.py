@@ -11,6 +11,7 @@ from telegram.ext import ContextTypes
 
 from telegram_bot.handlers.base import BaseHandler
 from telegram_bot.handlers.text_handler import TextHandler
+from telegram_bot.services.command_executor import VOICE_PENDING_KEY
 from telegram_bot.voice.audio_download import (
     cleanup_paths,
     extract_incoming_audio,
@@ -88,18 +89,44 @@ class VoiceHandler(BaseHandler):
                 incoming,
             )
             transcript = await asyncio.to_thread(transcribe, audio_path)
+            clean_transcript = transcript.strip()
+            if not clean_transcript:
+                await status_message.edit_text(
+                    '❌ Не удалось распознать речь. Попробуйте ещё раз.',
+                )
+                return
 
-            await status_message.edit_text(f'🎤 Распознано: «{transcript.strip()}»')
+            await status_message.edit_text(f'🎤 Распознано: «{clean_transcript}»')
 
             if _is_interactive_state(context):
-                context.user_data['_voice_text_override'] = transcript.strip()
+                context.user_data.pop(VOICE_PENDING_KEY, None)
+                context.user_data['_voice_text_override'] = clean_transcript
                 await self._text_handler.handle_text_message(update, context)
+                return
+
+            user_state = await self.get_user_state(telegram_user)
+            if user_state.awaiting_category_creation or (
+                user_state.awaiting_category and user_state.current_amount
+            ):
+                context.user_data.pop(VOICE_PENDING_KEY, None)
+                context.user_data['_voice_text_override'] = clean_transcript
+                await self._text_handler.handle_text_message(update, context)
+                return
+
+            if context.user_data.get(VOICE_PENDING_KEY):
+                await context.bot.send_message(
+                    chat_id=update.effective_chat.id,
+                    text=(
+                        'Есть неподтверждённая голосовая команда. '
+                        'Нажмите ✅ Да или ❌ Отмена в сообщении выше.'
+                    ),
+                )
                 return
 
             user = await sync_to_async(lambda: telegram_user.user)()
 
             def _interpret() -> ParsedVoiceCommand:
-                return VoiceInterpreter(user).interpret(transcript.strip())
+                return VoiceInterpreter(user).interpret(clean_transcript)
 
             command = await sync_to_async(_interpret)()
             await self._router.route(
