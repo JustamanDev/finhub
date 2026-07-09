@@ -10,6 +10,10 @@ from .base import BaseHandler
 from telegram_bot.keyboards.reports import ReportKeyboard
 from telegram_bot.services.report_service import ReportService
 from telegram_bot.services.report_export_service import ReportExportService
+from telegram_bot.utils.telegram_resilience import (
+    safe_edit_message_text,
+    send_or_edit_message,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -33,29 +37,13 @@ class ReportHandler(BaseHandler):
             "• 📈 Все отчеты - навигация по всем периодам"
         )
         
-        # Проверяем, является ли update CallbackQuery или Update
-        if hasattr(update, 'callback_query'):
-            # Это Update с callback_query
-            await update.callback_query.edit_message_text(
-                text=message,
-                reply_markup=keyboard,
-                parse_mode='Markdown',
-            )
-        elif hasattr(update, 'edit_message_text'):
-            # Это CallbackQuery напрямую
-            await update.edit_message_text(
-                text=message,
-                reply_markup=keyboard,
-                parse_mode='Markdown',
-            )
-        else:
-            # Это обычное сообщение
-            await context.bot.send_message(
-                chat_id=update.effective_chat.id,
-                text=message,
-                reply_markup=keyboard,
-                parse_mode='Markdown',
-            )
+        await send_or_edit_message(
+            update,
+            context,
+            text=message,
+            reply_markup=keyboard,
+            parse_mode='Markdown',
+        )
     
     async def handle_current_report(
         self,
@@ -140,7 +128,10 @@ class ReportHandler(BaseHandler):
             if hasattr(update, "message") and getattr(update, "message", None):
                 await update.message.reply_text("❌ Не удалось сформировать Excel. Попробуйте позже.")
             elif hasattr(update, "edit_message_text"):
-                await update.edit_message_text("❌ Не удалось сформировать Excel. Попробуйте позже.")
+                await safe_edit_message_text(
+                    update,
+                    text="❌ Не удалось сформировать Excel. Попробуйте позже.",
+                )
     
     async def _show_monthly_report(
         self,
@@ -169,29 +160,13 @@ class ReportHandler(BaseHandler):
             available_periods=available_periods,
         )
         
-        # Проверяем, является ли update CallbackQuery или Update
-        if hasattr(update, 'callback_query'):
-            # Это Update с callback_query
-            await update.callback_query.edit_message_text(
-                text=message,
-                reply_markup=keyboard,
-                parse_mode='Markdown',
-            )
-        elif hasattr(update, 'edit_message_text'):
-            # Это CallbackQuery напрямую
-            await update.edit_message_text(
-                text=message,
-                reply_markup=keyboard,
-                parse_mode='Markdown',
-            )
-        else:
-            # Это обычное сообщение
-            await context.bot.send_message(
-                chat_id=update.effective_chat.id,
-                text=message,
-                reply_markup=keyboard,
-                parse_mode='Markdown',
-            )
+        await send_or_edit_message(
+            update,
+            context,
+            text=message,
+            reply_markup=keyboard,
+            parse_mode='Markdown',
+        )
     
     def _format_report_message(self, report: dict) -> str:
         """Форматирует сообщение отчета"""

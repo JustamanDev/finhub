@@ -4,7 +4,9 @@ import asyncio
 import logging
 from typing import Awaitable, Callable, TypeVar
 
-from telegram.error import NetworkError, TimedOut
+from telegram import CallbackQuery, Update
+from telegram.error import BadRequest, NetworkError, TimedOut
+from telegram.ext import ContextTypes
 
 logger = logging.getLogger(__name__)
 
@@ -46,3 +48,85 @@ async def retry_telegram_call(
 
     assert last_error is not None
     raise last_error
+
+
+def is_message_not_modified_error(error: Exception) -> bool:
+    return isinstance(error, BadRequest) and "Message is not modified" in str(error)
+
+
+def get_callback_query(update: Update | CallbackQuery) -> CallbackQuery | None:
+    if hasattr(update, "callback_query") and update.callback_query is not None:
+        return update.callback_query
+    if hasattr(update, "edit_message_text"):
+        return update  # type: ignore[return-value]
+    return None
+
+
+async def _safe_answer_callback(query: CallbackQuery) -> None:
+    try:
+        await query.answer()
+    except BadRequest:
+        pass
+
+
+async def safe_edit_message_text(
+    query: CallbackQuery,
+    *,
+    text: str,
+    reply_markup=None,
+    parse_mode: str | None = None,
+    **kwargs,
+) -> bool:
+    """
+    Edit callback message; ignore Telegram 'Message is not modified'.
+
+    Returns True if the message was edited, False if content was unchanged.
+    """
+    try:
+        await query.edit_message_text(
+            text=text,
+            reply_markup=reply_markup,
+            parse_mode=parse_mode,
+            **kwargs,
+        )
+        return True
+    except BadRequest as exc:
+        if is_message_not_modified_error(exc):
+            logger.debug(
+                "Message is not modified for callback '%s' - ignoring",
+                query.data,
+            )
+            await _safe_answer_callback(query)
+            return False
+        raise
+
+
+async def send_or_edit_message(
+    update: Update | CallbackQuery,
+    context: ContextTypes.DEFAULT_TYPE,
+    *,
+    text: str,
+    reply_markup=None,
+    parse_mode: str | None = None,
+) -> bool:
+    """
+    Edit callback message or send a new one for non-callback updates.
+
+    Returns True if message was sent/edited, False if edit skipped as unchanged.
+    """
+    query = get_callback_query(update)
+    if query is not None:
+        return await safe_edit_message_text(
+            query,
+            text=text,
+            reply_markup=reply_markup,
+            parse_mode=parse_mode,
+        )
+
+    await context.bot.send_message(
+        chat_id=update.effective_chat.id,
+        text=text,
+        reply_markup=reply_markup,
+        parse_mode=parse_mode,
+    )
+    return True

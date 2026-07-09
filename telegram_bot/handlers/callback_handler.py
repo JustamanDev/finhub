@@ -17,6 +17,7 @@ from .base import BaseHandler
 from telegram_bot.keyboards.categories import CategoryKeyboard
 from telegram_bot.keyboards.actions import ActionKeyboard
 from telegram_bot.services.command_executor import CommandExecutor
+from telegram_bot.utils.telegram_resilience import safe_edit_message_text
 from telegram_bot.services.transaction_service import (
     TransactionService,
     SmartSuggestionsService,
@@ -360,7 +361,7 @@ class CallbackHandler(BaseHandler):
                 user=user,
             )
         except Category.DoesNotExist:
-            await query.edit_message_text("❌ Категория не найдена")
+            await safe_edit_message_text(query, text="❌ Категория не найдена")
             return
         
         # Получаем состояние пользователя
@@ -389,8 +390,8 @@ class CallbackHandler(BaseHandler):
                 transaction,
             )
         else:
-            await query.edit_message_text(
-                "❌ Сначала укажите сумму"
+            await safe_edit_message_text(query,
+                text="❌ Сначала укажите сумму",
             )
     
     async def _handle_type_switch(
@@ -420,13 +421,13 @@ class CallbackHandler(BaseHandler):
                 f"выбери категорию ({type_name}):"
             )
             
-            await query.edit_message_text(
+            await safe_edit_message_text(query,
                 text=message,
                 reply_markup=keyboard,
             )
         else:
-            await query.edit_message_text(
-                "❌ Сначала укажите сумму"
+            await safe_edit_message_text(query,
+                text="❌ Сначала укажите сумму",
             )
     
     async def _handle_page_navigation(
@@ -473,7 +474,7 @@ class CallbackHandler(BaseHandler):
             f"все категории ({type_name}):"
         )
         
-        await query.edit_message_text(
+        await safe_edit_message_text(query,
             text=message,
             reply_markup=keyboard,
         )
@@ -497,7 +498,7 @@ class CallbackHandler(BaseHandler):
             transaction.id
         )
         
-        await query.edit_message_text(
+        await safe_edit_message_text(query,
             text=message,
             reply_markup=keyboard,
         )
@@ -530,8 +531,8 @@ class CallbackHandler(BaseHandler):
                 ],
             ])
 
-            await query.edit_message_text(
-                "✏️ Введите новую сумму (например: 5000 или 499.90):",
+            await safe_edit_message_text(query,
+                text="✏️ Введите новую сумму (например: 5000 или 499.90):",
                 reply_markup=keyboard,
             )
         elif edit_type == 'date':
@@ -551,8 +552,8 @@ class CallbackHandler(BaseHandler):
                 ],
             ])
 
-            await query.edit_message_text(
-                "📅 Введите новую дату в формате ДД.MM.YYYY\nНапример: 25.12.2024",
+            await safe_edit_message_text(query,
+                text="📅 Введите новую дату в формате ДД.MM.YYYY\nНапример: 25.12.2024",
                 reply_markup=keyboard,
             )
         elif edit_type == 'comment':
@@ -572,8 +573,8 @@ class CallbackHandler(BaseHandler):
                 ],
             ])
 
-            await query.edit_message_text(
-                "💬 Введите комментарий к транзакции:",
+            await safe_edit_message_text(query,
+                text="💬 Введите комментарий к транзакции:",
                 reply_markup=keyboard,
             )
     
@@ -591,9 +592,9 @@ class CallbackHandler(BaseHandler):
         success = await transaction_service.delete_transaction(transaction_id)
         
         if success:
-            await query.edit_message_text("🗑️ Транзакция удалена")
+            await safe_edit_message_text(query, text="🗑️ Транзакция удалена")
         else:
-            await query.edit_message_text("❌ Транзакция не найдена")
+            await safe_edit_message_text(query, text="❌ Транзакция не найдена")
     
     async def _handle_unknown_callback(
         self,
@@ -601,8 +602,8 @@ class CallbackHandler(BaseHandler):
         context: ContextTypes.DEFAULT_TYPE,
     ) -> None:
         """Обрабатывает неизвестные callback"""
-        await query.edit_message_text(
-            "❌ Неизвестная команда"
+        await safe_edit_message_text(query,
+            text="❌ Неизвестная команда",
         )
     
     async def _handle_amount_selection(
@@ -613,7 +614,7 @@ class CallbackHandler(BaseHandler):
     ) -> None:
         """Обрабатывает выбор суммы"""
         # TODO: Реализовать выбор суммы
-        await query.edit_message_text("❌ Функция в разработке")
+        await safe_edit_message_text(query, text="❌ Функция в разработке")
     
     async def _handle_add_expense(
         self,
@@ -640,7 +641,7 @@ class CallbackHandler(BaseHandler):
             ],
         ])
 
-        await query.edit_message_text(text=message, reply_markup=keyboard)
+        await safe_edit_message_text(query,text=message, reply_markup=keyboard)
     
     async def _handle_add_income(
         self,
@@ -667,7 +668,7 @@ class CallbackHandler(BaseHandler):
             ],
         ])
 
-        await query.edit_message_text(text=message, reply_markup=keyboard)
+        await safe_edit_message_text(query,text=message, reply_markup=keyboard)
     
     async def _handle_show_stats(
         self,
@@ -699,7 +700,8 @@ class CallbackHandler(BaseHandler):
         from telegram_bot.keyboards.actions import ActionKeyboard
         keyboard = ActionKeyboard.get_main_menu_keyboard()
         
-        await query.edit_message_text(
+        await safe_edit_message_text(
+            query,
             text=stats_text,
             reply_markup=keyboard,
         )
@@ -1352,8 +1354,8 @@ class CallbackHandler(BaseHandler):
         context.user_data['goal_creation_data'] = {}
 
         keyboard = GoalsKeyboard.get_goal_input_keyboard(cancel_callback="goals_menu")
-        await query.edit_message_text(
-            "➕ **Создать цель**\n\nВведите название цели (например: iPad / Машина / Отпуск):",
+        await safe_edit_message_text(query,
+            text="➕ **Создать цель**\n\nВведите название цели (например: iPad / Машина / Отпуск):",
             reply_markup=keyboard,
             parse_mode='Markdown',
         )
@@ -1369,8 +1371,8 @@ class CallbackHandler(BaseHandler):
 
         context.user_data['goal_deposit_goal_id'] = goal_id
         keyboard = GoalsKeyboard.get_goal_input_keyboard(cancel_callback=f"goal_view_{goal_id}")
-        await query.edit_message_text(
-            "➕ **Внести в цель**\n\nВведите сумму (например: 5000 или 499.90):",
+        await safe_edit_message_text(query,
+            text="➕ **Внести в цель**\n\nВведите сумму (например: 5000 или 499.90):",
             reply_markup=keyboard,
             parse_mode='Markdown',
         )
@@ -1386,8 +1388,8 @@ class CallbackHandler(BaseHandler):
 
         context.user_data['goal_withdraw_goal_id'] = goal_id
         keyboard = GoalsKeyboard.get_goal_input_keyboard(cancel_callback=f"goal_view_{goal_id}")
-        await query.edit_message_text(
-            "↩️ **Снять из цели**\n\nВведите сумму, которую хотите снять:",
+        await safe_edit_message_text(query,
+            text="↩️ **Снять из цели**\n\nВведите сумму, которую хотите снять:",
             reply_markup=keyboard,
             parse_mode='Markdown',
         )
@@ -1700,4 +1702,4 @@ class CallbackHandler(BaseHandler):
 
         context.user_data.pop(VOICE_PENDING_KEY, None)
         await query.answer('Отменено')
-        await query.edit_message_text('❌ Голосовая команда отменена.') 
+        await safe_edit_message_text(query, text='❌ Голосовая команда отменена.') 

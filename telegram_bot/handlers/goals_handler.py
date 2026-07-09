@@ -180,23 +180,13 @@ class GoalsHandler(BaseHandler):
         message: str,
         keyboard,
     ) -> None:
-        if hasattr(update, 'callback_query'):
-            await update.callback_query.edit_message_text(
-                text=message,
-                reply_markup=keyboard,
-                parse_mode='Markdown',
-            )
-        elif hasattr(update, 'edit_message_text'):
-            await update.edit_message_text(
-                text=message,
-                reply_markup=keyboard,
-                parse_mode='Markdown',
-            )
-        else:
-            await context.bot.send_message(
-                chat_id=update.effective_chat.id,
-                text=message,
-                reply_markup=keyboard,
-                parse_mode='Markdown',
-            )
+        from telegram_bot.utils.telegram_resilience import send_or_edit_message
+
+        await send_or_edit_message(
+            update,
+            context,
+            text=message,
+            reply_markup=keyboard,
+            parse_mode='Markdown',
+        )
 

@@ -379,3 +379,36 @@ class OpenAIProxyConfigTests(TestCase):
         message = format_openai_error(exc)
         self.assertIn('OPENAI_PROXY_URL', message)
         self.assertIn('регион', message.lower())
+
+
+class TelegramResilienceTestCase(TestCase):
+    def test_is_message_not_modified_error(self):
+        from telegram.error import BadRequest
+        from telegram_bot.utils.telegram_resilience import is_message_not_modified_error
+
+        error = BadRequest(
+            "Message is not modified: specified new message content and "
+            "reply markup are exactly the same as a current content and "
+            "reply markup of the message",
+        )
+        other_error = BadRequest("Chat not found")
+
+        self.assertTrue(is_message_not_modified_error(error))
+        self.assertFalse(is_message_not_modified_error(other_error))
+        self.assertFalse(is_message_not_modified_error(ValueError("boom")))
+
+    def test_get_callback_query(self):
+        from telegram import CallbackQuery, Update
+        from unittest.mock import MagicMock
+        from telegram_bot.utils.telegram_resilience import get_callback_query
+
+        query = MagicMock(spec=CallbackQuery)
+        update = MagicMock(spec=Update)
+        update.callback_query = query
+
+        self.assertIs(get_callback_query(query), query)
+        self.assertIs(get_callback_query(update), query)
+        plain_update = MagicMock(spec=Update)
+        plain_update.callback_query = None
+        del plain_update.edit_message_text
+        self.assertIsNone(get_callback_query(plain_update))

@@ -2,7 +2,7 @@
 
 > **Source of truth.** Обновляй при завершении задач. Формат: дата + суть в 1–3 строки.
 
-**Обновлено:** 2026-06-30  
+**Обновлено:** 2026-07-09  
 **Стадия:** Production-ready core + активная разработка voice input  
 **Прогресс core:** ~85%
 
@@ -21,6 +21,7 @@
 
 ## Недавно завершено
 
+- [x] **Fix: Message is not modified** — `safe_edit_message_text` / `send_or_edit_message` во всех callback-обработчиках, ветка `fix/show-stats-not-modified`
 - [x] **Voice input MVP** — голосовой ввод расходов/доходов (`VOICE_ENABLED=True`)
 
 ## Backlog
@@ -35,6 +36,9 @@
 - `callback_handler.py`, `text_handler.py`, `settings_handler.py` — большие файлы
 
 ## Changelog (компактно)
+
+### 2026-07-09
+- Fix: повторный клик по inline-кнопкам не падает с `Message is not modified` (`safe_edit_message_text`, `send_or_edit_message`)
 
 ### 2026-06-30 (voice input)
 - Feature: голосовой ввод транзакций (Whisper + LLM interpreter + CommandExecutor)
