@@ -21,7 +21,7 @@
 
 ## Недавно завершено
 
-- [x] **Voice Phase 5** — hardening: spoken numbers, metrics, Whisper context
+- [x] **Voice Phase 5** — hardening: spoken numbers, metrics, Whisper context ([PR #36](https://github.com/JustamanDev/finhub/pull/36))
 - [x] **Voice Phase 4** — MANAGE_GOAL deposit/withdraw/create ([PR #34](https://github.com/JustamanDev/finhub/pull/34))
 - [x] **Voice Phase 3** — SET_BUDGET create/update monthly limits ([PR #33](https://github.com/JustamanDev/finhub/pull/33))
 - [x] **Voice Phase 2** — VoiceDialogManager (slot fill, timeout, category handoff)
@@ -44,7 +44,7 @@
 ## Changelog (компактно)
 
 ### 2026-07-09
-- Voice Phase 5 (in progress): spoken numbers, voice metrics, Whisper category prompt
+- Voice Phase 5 merged: spoken numbers, voice metrics, Whisper category prompt (PR #36)
 - Voice Phase 4 merged: MANAGE_GOAL deposit/withdraw/create via voice (PR #34)
 - Voice Phase 3 merged: SET_BUDGET create/update monthly budget via voice (PR #33)
 - Fix: повторный клик по inline-кнопкам не падает с `Message is not modified` (`safe_edit_message_text`, `send_or_edit_message`)
