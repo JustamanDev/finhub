@@ -535,67 +535,63 @@ class TextHandler(BaseHandler):
         user = await sync_to_async(lambda: telegram_user.user)()
         parser = await sync_to_async(self.get_parser)(user)
         transaction_type = user_state.last_transaction_type or 'expense'
-        category_name = message_text.strip()
+        amount = user_state.current_amount
+        raw_text = message_text.strip()
 
-        parsed = await sync_to_async(parser.parse)(category_name)
-        if (
-            parsed.get('success')
-            and parsed.get('type') == 'amount_category'
-            and parsed.get('category')
-        ):
-            try:
-                transaction = await TransactionService(user).create_transaction(
-                    amount=parsed['amount'],
-                    category=parsed['category'],
-                    transaction_type=parsed['transaction_type'],
-                    description=parsed.get('description') or '',
-                )
-                user_state.current_amount = None
-                user_state.awaiting_category = False
+        parsed = await sync_to_async(parser.parse)(raw_text)
+        if parsed.get('success') and parsed.get('type') == 'amount_only':
+            user_state.current_amount = parsed['amount']
+            if parsed.get('transaction_type'):
                 user_state.last_transaction_type = parsed['transaction_type']
-                await user_state.asave()
-
-                await self._command_executor.send_transaction_created(
-                    update,
-                    context,
-                    transaction,
-                    voice_transcript=message_text,
-                )
-            except Exception as exc:
-                logger.error('Awaiting category transaction error: %s', exc)
-                await self._command_executor.send_error(
-                    update,
-                    context,
-                    f'Ошибка создания транзакции: {exc}',
-                    voice_transcript=message_text,
-                )
-            return
-
-        category = await sync_to_async(parser._find_category)(
-            category_name,
-            transaction_type,
-        )
-        if not category:
+                transaction_type = parsed['transaction_type']
+            await user_state.asave()
             await self._command_executor.send_category_selection(
                 update,
                 context,
                 telegram_user,
                 user_state.current_amount,
                 transaction_type,
-                prefix_message=f"Категория '{category_name}' не найдена.",
+                voice_transcript=message_text,
+            )
+            return
+
+        lookup_name = raw_text
+        if parsed.get('success') and parsed.get('type') == 'amount_category':
+            lookup_name = parsed.get('category_name') or raw_text
+
+        category = None
+        if (
+            parsed.get('success')
+            and parsed.get('type') == 'amount_category'
+            and parsed.get('category')
+        ):
+            category = parsed['category']
+        else:
+            category = await sync_to_async(parser._find_category)(
+                lookup_name,
+                transaction_type,
+            )
+
+        if not category:
+            await self._command_executor.send_category_selection(
+                update,
+                context,
+                telegram_user,
+                amount,
+                transaction_type,
+                prefix_message=f"Категория '{lookup_name}' не найдена.",
                 voice_transcript=message_text,
             )
             return
 
         try:
             transaction = await TransactionService(user).create_transaction(
-                amount=user_state.current_amount,
+                amount=amount,
                 category=category,
                 transaction_type=transaction_type,
             )
             user_state.current_amount = None
             user_state.awaiting_category = False
-            user_state.last_transaction_type = transaction_type
             await user_state.asave()
 
             await self._command_executor.send_transaction_created(
