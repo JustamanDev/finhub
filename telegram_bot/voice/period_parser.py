@@ -98,14 +98,39 @@ def parse_advisor_period(question: str, today: date | None = None) -> ParsedPeri
             wants_comparison=True,
         )
 
-    if re.search(r'(прошл\w*|предыдущ\w*)\s+месяц', text):
+    # «сравни прошлый месяц с …» — previous month is the subject
+    if re.search(r'сравн\w*\s+(прошл\w*|предыдущ\w*)\s+месяц', text):
         target = _shift_month(month_start, -1)
         return ParsedPeriod(
             year=target.year,
             month=target.month,
             label=_month_label(target.year, target.month),
-            wants_comparison=wants_comparison,
+            wants_comparison=True,
         )
+
+    if re.search(r'(прошл\w*|предыдущ\w*)\s+месяц', text):
+        # «сравни с прошлым» / «чем в прошлом» — keep current as primary;
+        # previous month is always available via previous_period / MoM.
+        used_as_comparison_baseline = bool(
+            re.search(
+                r'(с\s+прошл\w*\s+месяц|чем\s+в\s+прошл|против\s+прошл)',
+                text,
+            )
+        ) or (
+            wants_comparison
+            and not re.search(
+                r'(?:в|за)\s+(прошл\w*|предыдущ\w*)\s+месяц',
+                text,
+            )
+        )
+        if not used_as_comparison_baseline:
+            target = _shift_month(month_start, -1)
+            return ParsedPeriod(
+                year=target.year,
+                month=target.month,
+                label=_month_label(target.year, target.month),
+                wants_comparison=wants_comparison,
+            )
 
     # Explicit month name + optional year: «в январе», «за март 2025»
     # Longer names first so «сентября» wins over shorter collisions.
