@@ -850,3 +850,158 @@ class VoiceBudgetPhase3Tests(TestCase):
         self.assertEqual(command.intent, VoiceIntentType.SET_BUDGET)
         self.assertIsNone(command.amount)
         self.assertEqual(command.category.id, self.transport.id)
+
+
+class VoiceGoalPhase4Tests(TestCase):
+    def setUp(self):
+        from decimal import Decimal
+
+        from asgiref.sync import async_to_sync
+        from goals.models import Goal
+
+        self.Decimal = Decimal
+        self.user = User.objects.create_user(
+            username='goal_voice',
+            password='test',
+        )
+        self.vacation = Goal.objects.create(
+            user=self.user,
+            title='Отпуск',
+            target_amount=Decimal('100000'),
+        )
+        self.ipad = Goal.objects.create(
+            user=self.user,
+            title='iPad',
+            target_amount=Decimal('80000'),
+        )
+        async_to_sync(self._seed_balance)()
+
+    async def _seed_balance(self):
+        from telegram_bot.services.goal_service import GoalService
+
+        await GoalService(self.user).add_deposit(self.vacation.id, self.Decimal('10000'))
+
+    def test_g1_deposit_fast_path(self):
+        from telegram_bot.voice.interpreter import VoiceInterpreter
+        from telegram_bot.voice.intents import GOAL_ACTION_DEPOSIT, VoiceIntentType
+
+        command = VoiceInterpreter(self.user).interpret(
+            'пополни цель отпуск на 5000',
+        )
+        self.assertEqual(command.intent, VoiceIntentType.MANAGE_GOAL)
+        self.assertEqual(command.goal_action, GOAL_ACTION_DEPOSIT)
+        self.assertEqual(command.amount, self.Decimal('5000'))
+        self.assertEqual(command.goal.id, self.vacation.id)
+
+    def test_g2_create_fast_path(self):
+        from telegram_bot.voice.interpreter import VoiceInterpreter
+        from telegram_bot.voice.intents import GOAL_ACTION_CREATE, VoiceIntentType
+
+        command = VoiceInterpreter(self.user).interpret(
+            'создай цель MacBook 150000',
+        )
+        self.assertEqual(command.intent, VoiceIntentType.MANAGE_GOAL)
+        self.assertEqual(command.goal_action, GOAL_ACTION_CREATE)
+        self.assertEqual(command.goal_title, 'MacBook')
+        self.assertEqual(command.amount, self.Decimal('150000'))
+
+    def test_g5_unknown_goal_slots(self):
+        from telegram_bot.voice.dialog import missing_slots_for_goal, next_step
+        from telegram_bot.voice.intents import (
+            GOAL_ACTION_DEPOSIT,
+            ParsedVoiceCommand,
+            VoiceIntentType,
+        )
+
+        command = ParsedVoiceCommand(
+            intent=VoiceIntentType.MANAGE_GOAL,
+            success=True,
+            confidence=1.0,
+            raw_transcript='пополни цель марсоход на 1000',
+            amount=self.Decimal('1000'),
+            goal_action=GOAL_ACTION_DEPOSIT,
+            goal_title='марсоход',
+            goal=None,
+        )
+        missing = missing_slots_for_goal(command)
+        self.assertEqual(missing, ['goal'])
+        self.assertEqual(next_step(missing), 'awaiting_goal')
+
+    def test_goal_resolver_exact(self):
+        from telegram_bot.voice.goal_resolver import GoalResolver, ResolveStatus
+
+        result = GoalResolver(self.user).resolve('отпуск')
+        self.assertEqual(result.status, ResolveStatus.MATCHED)
+        self.assertEqual(result.match.id, self.vacation.id)
+
+    def test_deposit_and_withdraw_executor(self):
+        from asgiref.sync import async_to_sync
+        from telegram_bot.services.voice_goal_executor import (
+            execute_goal_deposit,
+            execute_goal_withdraw,
+        )
+
+        deposit = async_to_sync(execute_goal_deposit)(
+            self.user,
+            self.vacation,
+            self.Decimal('2000'),
+        )
+        self.assertEqual(deposit.balance, self.Decimal('12000'))
+
+        withdraw = async_to_sync(execute_goal_withdraw)(
+            self.user,
+            self.vacation,
+            self.Decimal('3000'),
+        )
+        self.assertEqual(withdraw.balance, self.Decimal('9000'))
+
+    def test_create_goal_executor(self):
+        from asgiref.sync import async_to_sync
+        from telegram_bot.services.voice_goal_executor import execute_goal_create
+
+        result = async_to_sync(execute_goal_create)(
+            self.user,
+            'Велосипед',
+            self.Decimal('40000'),
+        )
+        self.assertEqual(result.goal.title, 'Велосипед')
+        self.assertEqual(result.goal.target_amount, self.Decimal('40000'))
+
+    def test_withdraw_insufficient_funds(self):
+        from asgiref.sync import async_to_sync
+        from telegram_bot.services.voice_goal_executor import execute_goal_withdraw
+
+        with self.assertRaises(ValueError):
+            async_to_sync(execute_goal_withdraw)(
+                self.user,
+                self.ipad,
+                self.Decimal('1000'),
+            )
+
+    def test_goal_slots_roundtrip(self):
+        from telegram_bot.voice.dialog import command_to_slots, slots_to_command
+        from telegram_bot.voice.intents import (
+            GOAL_ACTION_DEPOSIT,
+            ParsedVoiceCommand,
+            VoiceIntentType,
+        )
+
+        command = ParsedVoiceCommand(
+            intent=VoiceIntentType.MANAGE_GOAL,
+            success=True,
+            confidence=1.0,
+            raw_transcript='пополни отпуск',
+            amount=None,
+            goal_action=GOAL_ACTION_DEPOSIT,
+            goal_title='Отпуск',
+            goal=self.vacation,
+        )
+        slots = command_to_slots(command)
+        self.assertEqual(slots['intent'], 'manage_goal')
+        self.assertEqual(slots['goal_id'], self.vacation.id)
+        slots['amount'] = self.Decimal('2500')
+        rebuilt = slots_to_command(slots, command.raw_transcript)
+        self.assertEqual(rebuilt.intent, VoiceIntentType.MANAGE_GOAL)
+        self.assertEqual(rebuilt.goal_action, GOAL_ACTION_DEPOSIT)
+        self.assertEqual(rebuilt.amount, self.Decimal('2500'))
+

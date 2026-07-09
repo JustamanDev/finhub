@@ -140,11 +140,11 @@ flowchart TD
 
 | # | Сценарий | Ожидание | Сейчас |
 |---|----------|----------|--------|
-| G1 | «пополни цель отпуск на 5000» | deposit | ❌ stub |
-| G2 | «создай цель iPad 100000» | wizard shortcut | ❌ stub |
-| G3 | Голос в goal_creation_step | title/amount/deadline | ❌ broken (`message.text`) |
-| G4 | Голос deposit/withdraw prompt | amount | ❌ broken |
-| G5 | Цель «отпуск» не найдена | список целей / уточнить | ❌ |
+| G1 | «пополни цель отпуск на 5000» | deposit | ✅ Phase 4 |
+| G2 | «создай цель iPad 100000» | wizard shortcut | ✅ Phase 4 create |
+| G3 | Голос в goal_creation_step | title/amount/deadline | ✅ Phase 0 |
+| G4 | Голос deposit/withdraw prompt | amount | ✅ Phase 0 |
+| G5 | Цель «отпуск» не найдена | список целей / уточнить | ✅ Phase 4 picker |
 
 ### 3.6 Несуществующая категория (сквозной сценарий)
 
@@ -337,10 +337,14 @@ voice_dialog = {
 
 **Цель:** MANAGE_GOAL.
 
-- [ ] `VoiceGoalExecutor`: deposit, withdraw, create (simple)
-- [ ] Match goal by title (fuzzy)
-- [ ] Router: убрать stub MANAGE_GOAL
-- [ ] G1, G2, G5
+- [x] `VoiceGoalExecutor`: deposit, withdraw, create (simple)
+- [x] Match goal by title (fuzzy)
+- [x] Router: убрать stub MANAGE_GOAL
+- [x] G1, G2, G5
+
+**PR:** `feature/voice-phase-4-goals`
+
+**Критерий:** deposit/withdraw/create + goal picker.
 
 ### Phase 5 — Hardening (ongoing)
 

@@ -12,16 +12,19 @@ from telegram_bot.voice.dialog import (
     VoiceDialogManager,
     missing_slots_for_budget,
     missing_slots_for_create,
+    missing_slots_for_goal,
 )
-from telegram_bot.voice.intents import ParsedVoiceCommand, VoiceIntentType
+from telegram_bot.voice.intents import (
+    GOAL_ACTION_CREATE,
+    GOAL_ACTION_DEPOSIT,
+    GOAL_ACTION_WITHDRAW,
+    ParsedVoiceCommand,
+    VoiceIntentType,
+)
 
 logger = logging.getLogger(__name__)
 
 STUB_MESSAGES = {
-    VoiceIntentType.MANAGE_GOAL: (
-        '🎤 Голосовое управление целями скоро будет доступно.\n'
-        'Пока используй раздел «Цели» в меню.'
-    ),
     VoiceIntentType.ASK_ADVISOR: (
         '🎤 Финансовый консультант в разработке.\n'
         'Твой вопрос сохранён — вернёмся к этому позже.'
@@ -131,6 +134,75 @@ class VoiceRouter:
                 return
 
             await self._executor.execute_set_budget(
+                update,
+                context,
+                telegram_user,
+                command,
+            )
+            return
+
+        if command.intent == VoiceIntentType.MANAGE_GOAL:
+            if command.should_reject():
+                await self._executor.send_error(
+                    update,
+                    context,
+                    command.error or 'Не понял команду цели. Попробуй ещё раз.',
+                    voice_transcript=command.raw_transcript,
+                )
+                return
+
+            if not command.goal_action:
+                await self._executor.send_error(
+                    update,
+                    context,
+                    (
+                        'Уточните действие: пополнить, снять или создать цель.\n'
+                        'Пример: «пополни цель отпуск на 5000».'
+                    ),
+                    voice_transcript=command.raw_transcript,
+                )
+                return
+
+            missing = missing_slots_for_goal(command)
+
+            # Incomplete slots → dialog (amount / title).
+            if command.amount is None or (
+                command.goal_action == GOAL_ACTION_CREATE
+                and not command.goal_title
+            ) or (
+                command.goal_action in {
+                    GOAL_ACTION_DEPOSIT,
+                    GOAL_ACTION_WITHDRAW,
+                }
+                and not command.goal
+                and not command.goal_title
+            ):
+                await self._dialog.start_from_command(
+                    update,
+                    context,
+                    telegram_user,
+                    command,
+                    missing,
+                )
+                return
+
+            # Named but unresolved goal → picker.
+            if (
+                command.goal_action in {
+                    GOAL_ACTION_DEPOSIT,
+                    GOAL_ACTION_WITHDRAW,
+                }
+                and not command.goal
+            ):
+                await self._executor.prompt_goal_resolution(
+                    update,
+                    context,
+                    telegram_user,
+                    command,
+                )
+                return
+
+            await self._executor.execute_manage_goal(
                 update,
                 context,
                 telegram_user,

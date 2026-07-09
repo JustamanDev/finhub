@@ -45,6 +45,11 @@ RESPONSE_SCHEMA = {
         },
         'amount': {'type': ['number', 'null']},
         'category_name': {'type': ['string', 'null']},
+        'goal_action': {
+            'type': ['string', 'null'],
+            'enum': ['deposit', 'withdraw', 'create', None],
+        },
+        'goal_title': {'type': ['string', 'null']},
         'description': {'type': 'string'},
         'confidence': {'type': 'number'},
     },
@@ -53,6 +58,8 @@ RESPONSE_SCHEMA = {
         'transaction_type',
         'amount',
         'category_name',
+        'goal_action',
+        'goal_title',
         'description',
         'confidence',
     ],
@@ -88,6 +95,36 @@ BUDGET_VOICE_RE = re.compile(
     r'(?:(\d+(?:[.,]\d+)?)\s*)?'
     r'(?:руб(?:лей|ля|ль)?\.?\s*)?'
     r'(?:(?:на\s+)?(?:категори(?:ю|и)\s+)?(.+?))?[.\s]*$'
+)
+
+# «создай цель отпуск 100000», «новая цель iPad на 50000»
+GOAL_CREATE_RE = re.compile(
+    r'(?i)^(?:создай|новая|заведи)\s+цель\s+'
+    r'(.+?)\s+'
+    r'(?:на\s+)?'
+    r'(\d+(?:[.,]\d+)?)\s*'
+    r'(?:руб(?:лей|ля|ль)?\.?)?[.\s]*$'
+)
+
+# «пополни цель отпуск на 5000», «пополни отпуск 5000»
+GOAL_DEPOSIT_RE = re.compile(
+    r'(?i)^(?:пополни|внеси|положи|закинь)\s+'
+    r'(?:цель\s+)?'
+    r'(.+?)\s+'
+    r'(?:на\s+)?'
+    r'(\d+(?:[.,]\d+)?)\s*'
+    r'(?:руб(?:лей|ля|ль)?\.?)?[.\s]*$'
+)
+
+# «сними 1000 с цели отпуск», «снять с отпуск 1000»
+GOAL_WITHDRAW_RE = re.compile(
+    r'(?i)^(?:сними|снять|выведи|вывести)\s+'
+    r'(?:(\d+(?:[.,]\d+)?)\s*)?'
+    r'(?:руб(?:лей|ля|ль)?\.?\s*)?'
+    r'(?:с\s+)?(?:цели?\s+)?'
+    r'(.+?)'
+    r'(?:\s+(?:на\s+)?(\d+(?:[.,]\d+)?))?\s*'
+    r'(?:руб(?:лей|ля|ль)?\.?)?[.\s]*$'
 )
 
 
@@ -159,6 +196,10 @@ class VoiceInterpreter:
         budget = self._try_budget_fast_path(text)
         if budget:
             return budget
+
+        goal = self._try_goal_fast_path(text)
+        if goal:
+            return goal
 
         candidates = (
             text,
@@ -246,6 +287,91 @@ class VoiceInterpreter:
             ),
         )
 
+    def _try_goal_fast_path(self, text: str) -> ParsedVoiceCommand | None:
+        from telegram_bot.voice.goal_resolver import GoalResolver, ResolveStatus
+        from telegram_bot.voice.intents import (
+            GOAL_ACTION_CREATE,
+            GOAL_ACTION_DEPOSIT,
+            GOAL_ACTION_WITHDRAW,
+        )
+
+        create_match = GOAL_CREATE_RE.match(text)
+        if create_match:
+            title_raw, amount_raw = create_match.groups()
+            title = (title_raw or '').strip().strip('.')
+            try:
+                amount = Decimal(amount_raw.replace(',', '.')).copy_abs()
+            except (InvalidOperation, ValueError):
+                return None
+            if not title or amount <= 0:
+                return None
+            return ParsedVoiceCommand(
+                intent=VoiceIntentType.MANAGE_GOAL,
+                success=True,
+                confidence=1.0,
+                raw_transcript=text,
+                amount=amount,
+                goal_action=GOAL_ACTION_CREATE,
+                goal_title=title,
+            )
+
+        deposit_match = GOAL_DEPOSIT_RE.match(text)
+        if deposit_match:
+            title_raw, amount_raw = deposit_match.groups()
+            title = (title_raw or '').strip().strip('.')
+            # Avoid matching «пополни категорию …» style — require non-empty title
+            if title.lower() in {'цель', 'категорию', 'категория'}:
+                return None
+            try:
+                amount = Decimal(amount_raw.replace(',', '.')).copy_abs()
+            except (InvalidOperation, ValueError):
+                return None
+            if not title or amount <= 0:
+                return None
+            goal = None
+            resolved = GoalResolver(self.user).resolve(title)
+            if resolved.status == ResolveStatus.MATCHED:
+                goal = resolved.match
+            return ParsedVoiceCommand(
+                intent=VoiceIntentType.MANAGE_GOAL,
+                success=True,
+                confidence=1.0,
+                raw_transcript=text,
+                amount=amount,
+                goal_action=GOAL_ACTION_DEPOSIT,
+                goal_title=title,
+                goal=goal,
+            )
+
+        withdraw_match = GOAL_WITHDRAW_RE.match(text)
+        if withdraw_match:
+            amount_a, title_raw, amount_b = withdraw_match.groups()
+            amount_raw = amount_a or amount_b
+            title = (title_raw or '').strip().strip('.')
+            if not amount_raw or not title:
+                return None
+            try:
+                amount = Decimal(amount_raw.replace(',', '.')).copy_abs()
+            except (InvalidOperation, ValueError):
+                return None
+            if amount <= 0:
+                return None
+            goal = None
+            resolved = GoalResolver(self.user).resolve(title)
+            if resolved.status == ResolveStatus.MATCHED:
+                goal = resolved.match
+            return ParsedVoiceCommand(
+                intent=VoiceIntentType.MANAGE_GOAL,
+                success=True,
+                confidence=1.0,
+                raw_transcript=text,
+                amount=amount,
+                goal_action=GOAL_ACTION_WITHDRAW,
+                goal_title=title,
+                goal=goal,
+            )
+        return None
+
     def _interpret_with_llm(self, text: str) -> ParsedVoiceCommand:
         api_key = openai_api_key()
         if not api_key:
@@ -301,6 +427,8 @@ class VoiceInterpreter:
         )
 
     def _build_system_prompt(self) -> str:
+        from goals.models import Goal
+
         template = PROMPT_PATH.read_text(encoding='utf-8')
         categories = Category.objects.filter(user=self.user).order_by('type', 'name')
         lines = [
@@ -308,7 +436,17 @@ class VoiceInterpreter:
             for cat in categories
         ]
         categories_block = '\n'.join(lines) if lines else '(категорий пока нет)'
-        return template.replace('{{categories}}', categories_block)
+        goals = Goal.objects.filter(
+            user=self.user,
+            status=Goal.ACTIVE,
+        ).order_by('-created_at')
+        goal_lines = [f'- {goal.title}' for goal in goals]
+        goals_block = '\n'.join(goal_lines) if goal_lines else '(целей пока нет)'
+        return (
+            template
+            .replace('{{categories}}', categories_block)
+            .replace('{{goals}}', goals_block)
+        )
 
     def _payload_to_command(
         self,
@@ -319,6 +457,58 @@ class VoiceInterpreter:
         intent = INTENT_MAP.get(intent_raw, VoiceIntentType.UNKNOWN)
         confidence = float(payload.get('confidence', 0.0))
         confidence = max(0.0, min(1.0, confidence))
+
+        if intent == VoiceIntentType.MANAGE_GOAL:
+            from telegram_bot.voice.goal_resolver import GoalResolver, ResolveStatus
+            from telegram_bot.voice.intents import (
+                GOAL_ACTION_CREATE,
+                GOAL_ACTION_DEPOSIT,
+                GOAL_ACTION_WITHDRAW,
+            )
+
+            action_raw = (payload.get('goal_action') or '').strip().lower()
+            goal_title = (payload.get('goal_title') or '').strip()
+            amount_raw = payload.get('amount')
+            amount: Decimal | None = None
+            if amount_raw is not None:
+                try:
+                    amount = Decimal(str(amount_raw)).copy_abs()
+                except (InvalidOperation, ValueError):
+                    return ParsedVoiceCommand(
+                        intent=VoiceIntentType.MANAGE_GOAL,
+                        success=False,
+                        confidence=0.0,
+                        raw_transcript=text,
+                        error='Не удалось распознать сумму для цели.',
+                    )
+
+            action = None
+            if action_raw in {
+                GOAL_ACTION_CREATE,
+                GOAL_ACTION_DEPOSIT,
+                GOAL_ACTION_WITHDRAW,
+            }:
+                action = action_raw
+
+            goal = None
+            if goal_title and action != GOAL_ACTION_CREATE:
+                resolved = GoalResolver(self.user).resolve(goal_title)
+                if resolved.status == ResolveStatus.MATCHED:
+                    goal = resolved.match
+
+            return ParsedVoiceCommand(
+                intent=VoiceIntentType.MANAGE_GOAL,
+                success=True,
+                confidence=max(confidence, 0.6) if (
+                    action or goal_title or amount is not None
+                ) else confidence,
+                raw_transcript=text,
+                amount=amount,
+                goal_action=action,
+                goal_title=goal_title or None,
+                goal=goal,
+                description=(payload.get('description') or '').strip(),
+            )
 
         if intent == VoiceIntentType.SET_BUDGET:
             amount_raw = payload.get('amount')

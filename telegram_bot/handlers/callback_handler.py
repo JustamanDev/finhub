@@ -88,6 +88,13 @@ class CallbackHandler(BaseHandler):
                     context,
                     telegram_user,
                 )
+            elif query.data.startswith('voice_goal_pick_'):
+                await self._handle_voice_goal_pick(
+                    update,
+                    query,
+                    context,
+                    telegram_user,
+                )
             elif query.data == 'add_expense':
                 await self._handle_add_expense(
                     query,
@@ -1809,6 +1816,26 @@ class CallbackHandler(BaseHandler):
             telegram_user,
         )
 
+    async def _handle_voice_goal_pick(
+        self,
+        update: Update,
+        query: CallbackQuery,
+        context: ContextTypes.DEFAULT_TYPE,
+        telegram_user,
+    ) -> None:
+        await query.answer()
+        try:
+            goal_id = int(query.data.split('_')[-1])
+        except (ValueError, IndexError):
+            await query.answer('Ошибка данных')
+            return
+        await self._command_executor.apply_voice_goal_pick(
+            update,
+            context,
+            telegram_user,
+            goal_id,
+        )
+
     async def _handle_voice_dialog_type(
         self,
         update: Update,
@@ -1833,12 +1860,14 @@ class CallbackHandler(BaseHandler):
     ) -> None:
         from telegram_bot.services.command_executor import (
             VOICE_CATEGORY_PENDING_KEY,
+            VOICE_GOAL_PENDING_KEY,
             VOICE_PENDING_KEY,
         )
         from telegram_bot.voice.dialog import clear_dialog
 
         context.user_data.pop(VOICE_PENDING_KEY, None)
         context.user_data.pop(VOICE_CATEGORY_PENDING_KEY, None)
+        context.user_data.pop(VOICE_GOAL_PENDING_KEY, None)
         clear_dialog(context)
         await query.answer('Отменено')
         await safe_edit_message_text(query, text='❌ Голосовая команда отменена.') 
