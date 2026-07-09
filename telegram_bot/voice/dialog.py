@@ -25,6 +25,7 @@ State × Input → Action:
 from __future__ import annotations
 
 import logging
+import re
 import time
 from dataclasses import dataclass, field
 from decimal import Decimal, InvalidOperation
@@ -304,17 +305,54 @@ def slots_to_command(slots: dict[str, Any], transcript: str) -> ParsedVoiceComma
 
 
 def _parse_amount(text: str) -> Decimal | None:
-    cleaned = text.strip().replace(' ', '').replace(',', '.')
-    # Strip leading + for income-style amounts
+    from telegram_bot.voice.number_words import (
+        parse_number_words,
+        replace_spoken_numbers,
+    )
+
+    raw = (text or '').strip()
+    if not raw:
+        return None
+    # «Да, пять тысяч» / «ок 5000»
+    raw = re.sub(
+        r'(?i)^(да|ок|хорошо|верно|ага|угу)[,!.\s]+',
+        '',
+        raw,
+    ).strip()
+    # Drop currency words for digit parse
+    digitish = re.sub(
+        r'(?i)\s*руб(?:лей|ля|ль)?\.?\s*$',
+        '',
+        raw,
+    ).strip()
+
+    cleaned = digitish.replace(' ', '').replace(',', '.')
     if cleaned.startswith('+'):
         cleaned = cleaned[1:]
     try:
         value = Decimal(cleaned)
+        if value > 0:
+            return value.copy_abs()
     except (InvalidOperation, ValueError):
-        return None
-    if value <= 0:
-        return None
-    return value.copy_abs()
+        pass
+
+    expanded = replace_spoken_numbers(digitish)
+    expanded_clean = re.sub(
+        r'(?i)\s*руб(?:лей|ля|ль)?\.?\s*$',
+        '',
+        expanded,
+    ).strip().replace(' ', '').replace(',', '.')
+    try:
+        value = Decimal(expanded_clean)
+        if value > 0:
+            return value.copy_abs()
+    except (InvalidOperation, ValueError):
+        pass
+
+    spoken = parse_number_words(digitish)
+    if spoken is not None and spoken > 0:
+        return spoken.copy_abs()
+    return None
 
 
 def _parse_type(text: str) -> str | None:
