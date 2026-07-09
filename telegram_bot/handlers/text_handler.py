@@ -261,10 +261,16 @@ class TextHandler(BaseHandler):
             message_text = context.user_data.pop(
                 '_voice_text_override',
                 None,
-            ) or update.message.text
-
-            # Логируем входящее сообщение для отладки
-            logger.info(f"Получено текстовое сообщение: {message_text}")
+            )
+            if message_text is None:
+                message_text = update.message.text or ''
+            message_text = message_text.strip()
+            if not message_text:
+                await context.bot.send_message(
+                    chat_id=update.effective_chat.id,
+                    text='❌ Пустое сообщение. Введите текст или отправьте голос ещё раз.',
+                )
+                return
             
             # Получаем пользователя
             telegram_user = await self.get_or_create_telegram_user(
@@ -530,6 +536,40 @@ class TextHandler(BaseHandler):
         parser = await sync_to_async(self.get_parser)(user)
         transaction_type = user_state.last_transaction_type or 'expense'
         category_name = message_text.strip()
+
+        parsed = await sync_to_async(parser.parse)(category_name)
+        if (
+            parsed.get('success')
+            and parsed.get('type') == 'amount_category'
+            and parsed.get('category')
+        ):
+            try:
+                transaction = await TransactionService(user).create_transaction(
+                    amount=parsed['amount'],
+                    category=parsed['category'],
+                    transaction_type=parsed['transaction_type'],
+                    description=parsed.get('description') or '',
+                )
+                user_state.current_amount = None
+                user_state.awaiting_category = False
+                user_state.last_transaction_type = parsed['transaction_type']
+                await user_state.asave()
+
+                await self._command_executor.send_transaction_created(
+                    update,
+                    context,
+                    transaction,
+                    voice_transcript=message_text,
+                )
+            except Exception as exc:
+                logger.error('Awaiting category transaction error: %s', exc)
+                await self._command_executor.send_error(
+                    update,
+                    context,
+                    f'Ошибка создания транзакции: {exc}',
+                    voice_transcript=message_text,
+                )
+            return
 
         category = await sync_to_async(parser._find_category)(
             category_name,

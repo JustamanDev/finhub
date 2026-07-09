@@ -67,10 +67,17 @@ NATURAL_VOICE_RE = re.compile(
 )
 
 NATURAL_INCOME_VOICE_RE = re.compile(
-    r'(?i)^(?:получил|заработал|доход|зачисли|пришло|зарплата)\s+'
+    r'(?i)^(?:получил|заработал|доход|зачисли|пришло)\s+'
     r'(\d+(?:[.,]\d+)?)\s*'
     r'(?:руб(?:лей|ля|ль)?\.?\s*)?'
-    r'(?:на\s+)?(?:категори(?:ю|и)\s+)?(.+?)[.\s]*$'
+    r'(?:(?:на\s+)?(?:категори(?:ю|и)\s+)?(.+?))?[.\s]*$'
+)
+
+NATURAL_INCOME_NOUN_RE = re.compile(
+    r'(?i)^(?:зарплата|заработок)\s+'
+    r'(\d+(?:[.,]\d+)?)\s*'
+    r'(?:руб(?:лей|ля|ль)?\.?\s*)?'
+    r'(.+?)?[.\s]*$'
 )
 
 
@@ -90,12 +97,17 @@ def _compact_natural_phrase(text: str) -> str | None:
 
 
 def _compact_natural_income_phrase(text: str) -> str | None:
-    """«Получил 5000 зарплата» → «+5000 зарплата»."""
-    match = NATURAL_INCOME_VOICE_RE.match(text)
-    if not match:
-        return None
-    amount, category = match.groups()
-    return f'+{amount} {category.strip().strip(".")}'
+    """«Получил 5000 зарплата» → «+5000 зарплата», «зарплата 5000» → «+5000»."""
+    for pattern in (NATURAL_INCOME_VOICE_RE, NATURAL_INCOME_NOUN_RE):
+        match = pattern.match(text)
+        if not match:
+            continue
+        amount, category = match.groups()
+        category = (category or '').strip().strip('.')
+        if category:
+            return f'+{amount} {category}'
+        return f'+{amount}'
+    return None
 
 
 class VoiceInterpreter:

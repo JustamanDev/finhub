@@ -190,13 +190,15 @@ class CommandExecutor:
 
         base = BaseHandler()
         user_state = await base.get_user_state(telegram_user)
+        transaction_type = (
+            parsed_command.get('transaction_type')
+            or user_state.last_transaction_type
+            or 'expense'
+        )
         user_state.current_amount = parsed_command['amount']
         user_state.awaiting_category = True
+        user_state.last_transaction_type = transaction_type
         await user_state.asave()
-
-        transaction_type = parsed_command.get('transaction_type')
-        if not transaction_type:
-            transaction_type = user_state.last_transaction_type
 
         await self.send_category_selection(
             update,

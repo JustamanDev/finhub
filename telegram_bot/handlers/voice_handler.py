@@ -89,8 +89,14 @@ class VoiceHandler(BaseHandler):
                 incoming,
             )
             transcript = await asyncio.to_thread(transcribe, audio_path)
+            clean_transcript = transcript.strip()
+            if not clean_transcript:
+                await status_message.edit_text(
+                    '❌ Не удалось распознать речь. Попробуйте ещё раз.',
+                )
+                return
 
-            await status_message.edit_text(f'🎤 Распознано: «{transcript.strip()}»')
+            await status_message.edit_text(f'🎤 Распознано: «{clean_transcript}»')
 
             if context.user_data.get(VOICE_PENDING_KEY):
                 await context.bot.send_message(
@@ -104,19 +110,19 @@ class VoiceHandler(BaseHandler):
 
             user_state = await self.get_user_state(telegram_user)
             if user_state.awaiting_category or user_state.awaiting_category_creation:
-                context.user_data['_voice_text_override'] = transcript.strip()
+                context.user_data['_voice_text_override'] = clean_transcript
                 await self._text_handler.handle_text_message(update, context)
                 return
 
             if _is_interactive_state(context):
-                context.user_data['_voice_text_override'] = transcript.strip()
+                context.user_data['_voice_text_override'] = clean_transcript
                 await self._text_handler.handle_text_message(update, context)
                 return
 
             user = await sync_to_async(lambda: telegram_user.user)()
 
             def _interpret() -> ParsedVoiceCommand:
-                return VoiceInterpreter(user).interpret(transcript.strip())
+                return VoiceInterpreter(user).interpret(clean_transcript)
 
             command = await sync_to_async(_interpret)()
             await self._router.route(

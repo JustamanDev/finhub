@@ -372,6 +372,10 @@ class VoiceInterpreterRegexTests(TestCase):
             _compact_natural_income_phrase('получил 5000 зарплата'),
             '+5000 зарплата',
         )
+        self.assertEqual(
+            _compact_natural_income_phrase('зарплата 5000'),
+            '+5000',
+        )
 
     def test_compact_natural_phrase(self):
         from telegram_bot.voice.interpreter import _compact_natural_phrase
