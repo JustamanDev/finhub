@@ -23,6 +23,7 @@ logger = logging.getLogger(__name__)
 
 VOICE_PENDING_KEY = 'voice_pending'
 VOICE_CATEGORY_PENDING_KEY = 'voice_category_pending'
+VOICE_GOAL_PENDING_KEY = 'voice_goal_pending'
 
 
 class CommandExecutor:
@@ -239,6 +240,264 @@ class CommandExecutor:
                 InlineKeyboardButton(
                     text='📊 К списку бюджетов',
                     callback_data='budgets_view',
+                ),
+            ],
+            [
+                InlineKeyboardButton(
+                    text='🏠 Главное меню',
+                    callback_data='main_menu',
+                ),
+            ],
+        ])
+        await context.bot.send_message(
+            chat_id=update.effective_chat.id,
+            text='\n'.join(lines),
+            reply_markup=keyboard,
+        )
+
+    async def execute_manage_goal(
+        self,
+        update: Update,
+        context: ContextTypes.DEFAULT_TYPE,
+        telegram_user,
+        command: ParsedVoiceCommand,
+    ) -> None:
+        from telegram_bot.services.voice_goal_executor import (
+            GOAL_ACTION_CREATE,
+            GOAL_ACTION_DEPOSIT,
+            GOAL_ACTION_WITHDRAW,
+            execute_goal_create,
+            execute_goal_deposit,
+            execute_goal_withdraw,
+        )
+
+        action = command.goal_action
+        if action not in {
+            GOAL_ACTION_CREATE,
+            GOAL_ACTION_DEPOSIT,
+            GOAL_ACTION_WITHDRAW,
+        }:
+            await self.send_error(
+                update,
+                context,
+                (
+                    'Не понял действие с целью. '
+                    'Пример: «пополни цель отпуск на 5000».'
+                ),
+                voice_transcript=command.raw_transcript,
+            )
+            return
+
+        if command.amount is None:
+            await self.send_error(
+                update,
+                context,
+                'Укажите сумму. Пример: «пополни цель отпуск на 5000».',
+                voice_transcript=command.raw_transcript,
+            )
+            return
+
+        user = await sync_to_async(lambda: telegram_user.user)()
+        try:
+            if action == GOAL_ACTION_CREATE:
+                title = (command.goal_title or '').strip()
+                if not title:
+                    await self.send_error(
+                        update,
+                        context,
+                        'Укажите название цели. Пример: «создай цель отпуск 100000».',
+                        voice_transcript=command.raw_transcript,
+                    )
+                    return
+                result = await execute_goal_create(user, title, command.amount)
+            else:
+                if command.goal is None:
+                    await self.prompt_goal_resolution(
+                        update,
+                        context,
+                        telegram_user,
+                        command,
+                    )
+                    return
+                if action == GOAL_ACTION_DEPOSIT:
+                    result = await execute_goal_deposit(
+                        user,
+                        command.goal,
+                        command.amount,
+                    )
+                else:
+                    result = await execute_goal_withdraw(
+                        user,
+                        command.goal,
+                        command.amount,
+                    )
+        except ValueError as exc:
+            await self.send_error(
+                update,
+                context,
+                str(exc),
+                voice_transcript=command.raw_transcript,
+            )
+            return
+        except Exception as exc:
+            logger.error('Goal voice action error: %s', exc)
+            await self.send_error(
+                update,
+                context,
+                f'Ошибка операции с целью: {exc}',
+                voice_transcript=command.raw_transcript,
+            )
+            return
+
+        await self.send_goal_action_result(
+            update,
+            context,
+            telegram_user,
+            result,
+            voice_transcript=command.raw_transcript,
+        )
+
+    async def prompt_goal_resolution(
+        self,
+        update: Update,
+        context: ContextTypes.DEFAULT_TYPE,
+        telegram_user,
+        command: ParsedVoiceCommand,
+    ) -> None:
+        from telegram_bot.voice.goal_resolver import GoalResolver, ResolveStatus
+
+        user = await sync_to_async(lambda: telegram_user.user)()
+        query_name = command.goal_title or ''
+        resolved = await sync_to_async(GoalResolver(user).resolve)(query_name)
+
+        context.user_data[VOICE_GOAL_PENDING_KEY] = {'command': command}
+
+        lines = [
+            f'🎤 Распознано: «{command.raw_transcript}»',
+            '',
+        ]
+        amount_label = (
+            f'{command.amount:,.0f}₽' if command.amount is not None else '—'
+        )
+        if resolved.status == ResolveStatus.AMBIGUOUS:
+            lines.append(
+                f'Несколько похожих целей для {amount_label} '
+                f'(«{query_name}»). Выбери:',
+            )
+        elif resolved.candidates:
+            lines.append(
+                f'Цель «{query_name}» не найдена точно. Выбери:',
+            )
+        else:
+            lines.append(
+                f'Цель «{query_name}» не найдена. Выбери из списка '
+                f'или создай через меню «Цели».',
+            )
+
+        rows: list[list[InlineKeyboardButton]] = []
+        if resolved.candidates:
+            pick_goals = [c.goal for c in resolved.candidates]
+        else:
+            from telegram_bot.services.voice_goal_executor import (
+                list_active_goals_async,
+            )
+
+            pick_goals = await list_active_goals_async(user)
+            pick_goals = pick_goals[:5]
+
+        for goal in pick_goals:
+            rows.append([
+                InlineKeyboardButton(
+                    text=goal.title[:64],
+                    callback_data=f'voice_goal_pick_{goal.id}',
+                ),
+            ])
+        rows.append([
+            InlineKeyboardButton(
+                text='❌ Отмена',
+                callback_data='voice_cancel',
+            ),
+        ])
+        await context.bot.send_message(
+            chat_id=update.effective_chat.id,
+            text='\n'.join(lines),
+            reply_markup=InlineKeyboardMarkup(rows),
+        )
+
+    async def apply_voice_goal_pick(
+        self,
+        update: Update,
+        context: ContextTypes.DEFAULT_TYPE,
+        telegram_user,
+        goal_id: int,
+    ) -> None:
+        from goals.models import Goal
+
+        pending = context.user_data.pop(VOICE_GOAL_PENDING_KEY, None)
+        if not pending:
+            await update.callback_query.answer('Нет данных для выбора цели.')
+            return
+
+        command: ParsedVoiceCommand = pending['command']
+        user = await sync_to_async(lambda: telegram_user.user)()
+        try:
+            goal = await Goal.objects.aget(id=goal_id, user=user)
+        except Goal.DoesNotExist:
+            await update.callback_query.answer('Цель не найдена')
+            return
+
+        command.goal = goal
+        command.goal_title = goal.title
+        await self.execute_manage_goal(
+            update,
+            context,
+            telegram_user,
+            command,
+        )
+
+    async def send_goal_action_result(
+        self,
+        update: Update,
+        context: ContextTypes.DEFAULT_TYPE,
+        telegram_user,
+        result,
+        *,
+        voice_transcript: str | None = None,
+    ) -> None:
+        from telegram_bot.services.voice_goal_executor import (
+            GOAL_ACTION_CREATE,
+            GOAL_ACTION_DEPOSIT,
+            GOAL_ACTION_WITHDRAW,
+        )
+
+        lines: list[str] = []
+        if voice_transcript:
+            lines.append(f'🎤 Распознано: «{voice_transcript}»')
+        if result.action == GOAL_ACTION_CREATE:
+            lines.append(
+                f'✅ Цель создана: {result.goal.title} — '
+                f'{result.goal.target_amount:,.0f}₽',
+            )
+        elif result.action == GOAL_ACTION_DEPOSIT:
+            lines.append(
+                f'✅ Пополнено {result.entry.amount:,.0f}₽ → '
+                f'{result.goal.title}',
+            )
+            if result.balance is not None:
+                lines.append(f'Баланс: {result.balance:,.0f}₽')
+        elif result.action == GOAL_ACTION_WITHDRAW:
+            lines.append(
+                f'✅ Снято {abs(result.entry.amount):,.0f}₽ с '
+                f'{result.goal.title}',
+            )
+            if result.balance is not None:
+                lines.append(f'Баланс: {result.balance:,.0f}₽')
+
+        keyboard = InlineKeyboardMarkup([
+            [
+                InlineKeyboardButton(
+                    text='🎯 К цели',
+                    callback_data=f'goal_view_{result.goal.id}',
                 ),
             ],
             [

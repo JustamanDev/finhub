@@ -13,6 +13,7 @@ from telegram_bot.handlers.base import BaseHandler
 from telegram_bot.handlers.text_handler import TextHandler
 from telegram_bot.services.command_executor import (
     VOICE_CATEGORY_PENDING_KEY,
+    VOICE_GOAL_PENDING_KEY,
     VOICE_PENDING_KEY,
 )
 from telegram_bot.voice.audio_download import (
@@ -111,6 +112,7 @@ class VoiceHandler(BaseHandler):
             if _is_interactive_state(context):
                 context.user_data.pop(VOICE_PENDING_KEY, None)
                 context.user_data.pop(VOICE_CATEGORY_PENDING_KEY, None)
+                context.user_data.pop(VOICE_GOAL_PENDING_KEY, None)
                 clear_dialog(context)
                 context.user_data['_voice_text_override'] = clean_transcript
                 await self._text_handler.handle_text_message(update, context)
@@ -143,14 +145,16 @@ class VoiceHandler(BaseHandler):
                 )
                 return
 
-            if context.user_data.get(VOICE_PENDING_KEY) or context.user_data.get(
-                VOICE_CATEGORY_PENDING_KEY,
+            if (
+                context.user_data.get(VOICE_PENDING_KEY)
+                or context.user_data.get(VOICE_CATEGORY_PENDING_KEY)
+                or context.user_data.get(VOICE_GOAL_PENDING_KEY)
             ):
                 await context.bot.send_message(
                     chat_id=update.effective_chat.id,
                     text=(
                         'Есть незавершённая голосовая команда. '
-                        'Выберите категорию, подтвердите или нажмите ❌ Отмена.'
+                        'Выберите цель/категорию, подтвердите или нажмите ❌ Отмена.'
                     ),
                 )
                 return

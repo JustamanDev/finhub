@@ -37,6 +37,9 @@ from telegram.ext import ContextTypes
 from telegram_bot.voice.category_resolver import CategoryResolver, ResolveStatus
 from telegram_bot.voice.intents import (
     CONFIDENCE_AUTO_SAVE,
+    GOAL_ACTION_CREATE,
+    GOAL_ACTION_DEPOSIT,
+    GOAL_ACTION_WITHDRAW,
     ParsedVoiceCommand,
     VoiceIntentType,
 )
@@ -50,6 +53,7 @@ DEFAULT_TIMEOUT_SEC = 300
 STEP_AMOUNT = 'awaiting_amount'
 STEP_TYPE = 'awaiting_type'
 STEP_CATEGORY = 'awaiting_category'
+STEP_GOAL = 'awaiting_goal'
 STEP_CONFIRM = 'awaiting_confirm'
 
 TYPE_KEYWORDS = {
@@ -143,6 +147,29 @@ def missing_slots_for_budget(command: ParsedVoiceCommand) -> list[str]:
     return missing
 
 
+def missing_slots_for_goal(command: ParsedVoiceCommand) -> list[str]:
+    """Return ordered missing slots for MANAGE_GOAL dialog."""
+    missing: list[str] = []
+    action = command.goal_action
+    if not action:
+        missing.append('goal_action')
+        return missing
+    if action == GOAL_ACTION_CREATE:
+        if not command.goal_title:
+            missing.append('goal')
+        if command.amount is None:
+            missing.append('amount')
+        return missing
+    if action in {GOAL_ACTION_DEPOSIT, GOAL_ACTION_WITHDRAW}:
+        if command.amount is None:
+            missing.append('amount')
+        if not command.goal and not command.goal_title:
+            missing.append('goal')
+        elif command.goal_title and not command.goal:
+            missing.append('goal')
+    return missing
+
+
 def next_step(missing: list[str]) -> str | None:
     if 'amount' in missing:
         return STEP_AMOUNT
@@ -150,14 +177,34 @@ def next_step(missing: list[str]) -> str | None:
         return STEP_TYPE
     if 'category' in missing:
         return STEP_CATEGORY
+    if 'goal' in missing:
+        return STEP_GOAL
     return None
 
 
 def prompt_for_step(step: str, slots: dict[str, Any], *, intent: str = '') -> str:
     amount = slots.get('amount')
     cat = slots.get('category_name') or slots.get('category_label')
+    goal_title = slots.get('goal_title') or slots.get('goal_label')
+    goal_action = slots.get('goal_action')
     is_budget = intent == VoiceIntentType.SET_BUDGET.value
+    is_goal = intent == VoiceIntentType.MANAGE_GOAL.value
     if step == STEP_AMOUNT:
+        if is_goal:
+            if goal_action == GOAL_ACTION_CREATE:
+                if goal_title:
+                    return (
+                        f'Какая целевая сумма для «{goal_title}»? '
+                        f'Например: 100000'
+                    )
+                return 'Какая целевая сумма? Например: 100000'
+            if goal_action == GOAL_ACTION_WITHDRAW:
+                if goal_title:
+                    return f'Сколько снять с «{goal_title}»? Например: 1000'
+                return 'Сколько снять с цели? Например: 1000'
+            if goal_title:
+                return f'Сколько пополнить «{goal_title}»? Например: 5000'
+            return 'Сколько пополнить цель? Например: 5000'
         if is_budget:
             if cat:
                 return f'Какой лимит установить на «{cat}»? Например: 5000'
@@ -175,6 +222,13 @@ def prompt_for_step(step: str, slots: dict[str, Any], *, intent: str = '') -> st
         if amount is not None:
             return f'На какую категорию записать {amount:,.0f}₽?'
         return 'На какую категорию записать?'
+    if step == STEP_GOAL:
+        if goal_action == GOAL_ACTION_CREATE:
+            return 'Как назвать новую цель?'
+        if amount is not None:
+            verb = 'снять' if goal_action == GOAL_ACTION_WITHDRAW else 'пополнить'
+            return f'Какую цель {verb} на {amount:,.0f}₽?'
+        return 'Какую цель имеете в виду?'
     return 'Уточните, пожалуйста.'
 
 
@@ -194,6 +248,14 @@ def command_to_slots(command: ParsedVoiceCommand) -> dict[str, Any]:
             f'{command.category.icon} {command.category.name}'
         )
         slots['transaction_type'] = command.category.type
+    if command.goal_action:
+        slots['goal_action'] = command.goal_action
+    if command.goal_title:
+        slots['goal_title'] = command.goal_title
+    if command.goal is not None:
+        slots['goal_id'] = command.goal.id
+        slots['goal_title'] = command.goal.title
+        slots['goal_label'] = command.goal.title
     if command.description:
         slots['description'] = command.description
     slots['confidence'] = command.confidence
@@ -211,11 +273,12 @@ def slots_to_command(slots: dict[str, Any], transcript: str) -> ParsedVoiceComma
     category_name = slots.get('category_name')
     tx_type = slots.get('transaction_type') or 'expense'
     intent_raw = slots.get('intent') or VoiceIntentType.CREATE_TRANSACTION.value
-    intent = (
-        VoiceIntentType.SET_BUDGET
-        if intent_raw == VoiceIntentType.SET_BUDGET.value
-        else VoiceIntentType.CREATE_TRANSACTION
-    )
+    if intent_raw == VoiceIntentType.SET_BUDGET.value:
+        intent = VoiceIntentType.SET_BUDGET
+    elif intent_raw == VoiceIntentType.MANAGE_GOAL.value:
+        intent = VoiceIntentType.MANAGE_GOAL
+    else:
+        intent = VoiceIntentType.CREATE_TRANSACTION
     has_category = category_id is not None or category is not None
     if category_name and not has_category:
         command_type = 'amount_category'
@@ -234,6 +297,9 @@ def slots_to_command(slots: dict[str, Any], transcript: str) -> ParsedVoiceComma
         category=category,
         description=slots.get('description') or '',
         command_type=command_type,
+        goal_action=slots.get('goal_action'),
+        goal_title=slots.get('goal_title'),
+        goal=None,
     )
 
 
@@ -389,6 +455,25 @@ class VoiceDialogManager:
             command = slots_to_command(dialog.slots, dialog.transcript)
             clear_dialog(context)
             await self._executor.prompt_category_resolution(
+                update,
+                context,
+                telegram_user,
+                command,
+            )
+            return True
+
+        # Named but unresolved goal → picker UI.
+        if (
+            dialog.intent == VoiceIntentType.MANAGE_GOAL.value
+            and 'goal' in missing
+            and dialog.slots.get('goal_title')
+            and not dialog.slots.get('goal_id')
+            and dialog.slots.get('goal_action') != GOAL_ACTION_CREATE
+            and dialog.slots.get('amount') is not None
+        ):
+            command = slots_to_command(dialog.slots, dialog.transcript)
+            clear_dialog(context)
+            await self._executor.prompt_goal_resolution(
                 update,
                 context,
                 telegram_user,
@@ -587,6 +672,44 @@ class VoiceDialogManager:
             else:
                 dialog.slots['category_name'] = text
 
+        if dialog.step == STEP_GOAL:
+            from telegram_bot.voice.goal_resolver import (
+                GoalResolver,
+                ResolveStatus as GoalResolveStatus,
+            )
+
+            action = dialog.slots.get('goal_action')
+            if action == GOAL_ACTION_CREATE:
+                title = text.strip()
+                if title:
+                    dialog.slots['goal_title'] = title
+                return
+
+            for candidate in voice_text_parse_candidates(text):
+                parsed = await sync_to_async(VoiceInterpreter(user).interpret)(
+                    candidate,
+                )
+                if parsed.goal is not None:
+                    dialog.slots['goal_id'] = parsed.goal.id
+                    dialog.slots['goal_title'] = parsed.goal.title
+                    dialog.slots['goal_label'] = parsed.goal.title
+                    if parsed.amount is not None:
+                        dialog.slots['amount'] = parsed.amount
+                    if parsed.goal_action:
+                        dialog.slots['goal_action'] = parsed.goal_action
+                    return
+                if parsed.goal_title:
+                    dialog.slots['goal_title'] = parsed.goal_title
+
+            resolved = await sync_to_async(GoalResolver(user).resolve)(text)
+            if resolved.status == GoalResolveStatus.MATCHED and resolved.match:
+                goal = resolved.match
+                dialog.slots['goal_id'] = goal.id
+                dialog.slots['goal_title'] = goal.title
+                dialog.slots['goal_label'] = goal.title
+            else:
+                dialog.slots['goal_title'] = text
+
     def _missing_from_slots(
         self,
         slots: dict[str, Any],
@@ -594,7 +717,25 @@ class VoiceDialogManager:
         intent: str = '',
     ) -> list[str]:
         is_budget = intent == VoiceIntentType.SET_BUDGET.value
+        is_goal = intent == VoiceIntentType.MANAGE_GOAL.value
         missing: list[str] = []
+        if is_goal:
+            action = slots.get('goal_action')
+            if not action:
+                missing.append('goal_action')
+                return missing
+            if action == GOAL_ACTION_CREATE:
+                if not slots.get('goal_title'):
+                    missing.append('goal')
+                if slots.get('amount') is None:
+                    missing.append('amount')
+                return missing
+            if slots.get('amount') is None:
+                missing.append('amount')
+            if not slots.get('goal_id'):
+                missing.append('goal')
+            return missing
+
         if slots.get('amount') is None:
             missing.append('amount')
         if not is_budget and not slots.get('transaction_type'):
@@ -617,6 +758,7 @@ class VoiceDialogManager:
         transcript: str,
     ) -> None:
         from categories.models import Category
+        from goals.models import Goal
 
         command = slots_to_command(slots, transcript)
         category_id = slots.get('category_id')
@@ -632,6 +774,37 @@ class VoiceDialogManager:
                 command.command_type = 'amount_category'
             except Category.DoesNotExist:
                 command.category = None
+
+        goal_id = slots.get('goal_id')
+        if goal_id is not None:
+            user = await sync_to_async(lambda: telegram_user.user)()
+            try:
+                command.goal = await Goal.objects.aget(id=goal_id, user=user)
+                command.goal_title = command.goal.title
+            except Goal.DoesNotExist:
+                command.goal = None
+
+        if command.intent == VoiceIntentType.MANAGE_GOAL:
+            if (
+                command.goal_action in {GOAL_ACTION_DEPOSIT, GOAL_ACTION_WITHDRAW}
+                and command.goal_title
+                and not command.goal
+                and command.amount is not None
+            ):
+                await self._executor.prompt_goal_resolution(
+                    update,
+                    context,
+                    telegram_user,
+                    command,
+                )
+                return
+            await self._executor.execute_manage_goal(
+                update,
+                context,
+                telegram_user,
+                command,
+            )
+            return
 
         if command.intent == VoiceIntentType.SET_BUDGET:
             command.transaction_type = 'expense'

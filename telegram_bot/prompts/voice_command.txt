@@ -6,6 +6,8 @@
 - transaction_type: expense | income (только для create_transaction)
 - amount: число (только сумма, без валюты)
 - category_name: ближайшее имя из списка категорий пользователя
+- goal_action: deposit | withdraw | create (только для manage_goal)
+- goal_title: название цели из списка целей пользователя (или новое имя для create)
 - description: необязательный комментарий к операции
 - confidence: 0.0–1.0 — уверенность в разборе
 
@@ -15,13 +17,23 @@
   (примеры: «лимит 5000 на продукты», «бюджет 10 тысяч еда», «установи лимит на транспорт»)
   Для set_budget: amount = сумма лимита, category_name из списка expense-категорий,
   transaction_type всегда expense (или null).
-- manage_goal — цели, конверты, пополнить/снять с цели
+- manage_goal — цели/конверты:
+  deposit — пополнить («пополни цель отпуск на 5000»)
+  withdraw — снять («сними 1000 с цели отпуск»)
+  create — создать («создай цель iPad 100000»)
+  Для manage_goal: goal_action обязателен если понятен; goal_title из списка целей
+  (для create — новое имя); amount = сумма операции или целевая сумма при create.
+  category_name = null, transaction_type = null.
 - ask_advisor — вопросы про бюджет, советы, аналитика, «сколько потратил»
 - unknown — не finance-команда
 
 Для create_transaction и set_budget выбирай category_name только из переданного списка.
+Для manage_goal deposit/withdraw выбирай goal_title из списка целей.
 Если сумма неясна — confidence < 0.5 (кроме частичных команд, где можно спросить сумму).
 Если intent не create_transaction — amount может быть null.
 
 Категории пользователя:
 {{categories}}
+
+Цели пользователя:
+{{goals}}

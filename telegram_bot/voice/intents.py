@@ -8,6 +8,7 @@ from enum import Enum
 from typing import Any
 
 from categories.models import Category
+from goals.models import Goal
 
 
 class VoiceIntentType(str, Enum):
@@ -20,6 +21,10 @@ class VoiceIntentType(str, Enum):
 
 CONFIDENCE_AUTO_SAVE = 0.85
 CONFIDENCE_CONFIRM = 0.5
+
+GOAL_ACTION_DEPOSIT = 'deposit'
+GOAL_ACTION_WITHDRAW = 'withdraw'
+GOAL_ACTION_CREATE = 'create'
 
 
 @dataclass
@@ -35,6 +40,9 @@ class ParsedVoiceCommand:
     description: str = ''
     error: str | None = None
     command_type: str | None = None
+    goal_action: str | None = None
+    goal_title: str | None = None
+    goal: Goal | None = None
 
     def needs_confirmation(self) -> bool:
         if not self.success:
@@ -59,6 +67,16 @@ class ParsedVoiceCommand:
                 return True
             # Partial budget command → dialog, not hard reject.
             if self.amount is not None or self.category_name or self.category:
+                return False
+            return self.confidence < CONFIDENCE_CONFIRM
+        if self.intent == VoiceIntentType.MANAGE_GOAL:
+            has_partial = bool(
+                self.goal_action
+                or self.goal_title
+                or self.goal
+                or self.amount is not None
+            )
+            if has_partial:
                 return False
             return self.confidence < CONFIDENCE_CONFIRM
         if self.intent != VoiceIntentType.CREATE_TRANSACTION:
