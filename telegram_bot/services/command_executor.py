@@ -513,6 +513,74 @@ class CommandExecutor:
             reply_markup=keyboard,
         )
 
+    async def execute_ask_advisor(
+        self,
+        update: Update,
+        context: ContextTypes.DEFAULT_TYPE,
+        telegram_user,
+        command: ParsedVoiceCommand,
+    ) -> None:
+        question = (command.raw_transcript or '').strip()
+        if not question:
+            await self.send_error(
+                update,
+                context,
+                'Пустой вопрос. Спросите, например: «сколько потратил в этом месяце?»',
+            )
+            return
+
+        status = await context.bot.send_message(
+            chat_id=update.effective_chat.id,
+            text='🤔 Смотрю ваши цифры…',
+        )
+        user = await sync_to_async(lambda: telegram_user.user)()
+        try:
+            from telegram_bot.services.voice_advisor_executor import (
+                answer_advisor_query,
+            )
+
+            answer = await answer_advisor_query(user, question)
+        except ValueError as exc:
+            await status.edit_text(f'❌ {exc}')
+            return
+        except Exception as exc:
+            logger.error('Advisor error: %s', exc, exc_info=True)
+            await status.edit_text(
+                '❌ Не удалось получить ответ консультанта. Попробуйте позже.',
+            )
+            return
+
+        lines = [
+            f'🎤 Распознано: «{question}»',
+            '',
+            answer,
+        ]
+        keyboard = InlineKeyboardMarkup([
+            [
+                InlineKeyboardButton(
+                    text='📊 Отчёты',
+                    callback_data='show_report',
+                ),
+            ],
+            [
+                InlineKeyboardButton(
+                    text='🏠 Главное меню',
+                    callback_data='main_menu',
+                ),
+            ],
+        ])
+        try:
+            await status.edit_text(
+                '\n'.join(lines),
+                reply_markup=keyboard,
+            )
+        except Exception:
+            await context.bot.send_message(
+                chat_id=update.effective_chat.id,
+                text='\n'.join(lines),
+                reply_markup=keyboard,
+            )
+
     async def prompt_voice_confirmation(
         self,
         update: Update,

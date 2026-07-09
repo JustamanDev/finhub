@@ -17,10 +17,11 @@
 
 ## В работе
 
-- [ ] ASK_ADVISOR / финансовый консультант — отдельный эпик
+- [ ] ASK_ADVISOR расширения (тренды, произвольный период) — backlog
 
 ## Недавно завершено
 
+- [x] **ASK_ADVISOR MVP** — grounded LLM ответ по snapshot (месяц/бюджеты/цели)
 - [x] **Voice Phase 5** — hardening: spoken numbers, metrics, Whisper context ([PR #36](https://github.com/JustamanDev/finhub/pull/36))
 - [x] **Voice Phase 4** — MANAGE_GOAL deposit/withdraw/create ([PR #34](https://github.com/JustamanDev/finhub/pull/34))
 - [x] **Voice Phase 3** — SET_BUDGET create/update monthly limits ([PR #33](https://github.com/JustamanDev/finhub/pull/33))
@@ -44,6 +45,7 @@
 ## Changelog (компактно)
 
 ### 2026-07-09
+- ASK_ADVISOR MVP (in progress): snapshot + grounded LLM financial answers
 - Voice Phase 5 merged: spoken numbers, voice metrics, Whisper category prompt (PR #36)
 - Voice Phase 4 merged: MANAGE_GOAL deposit/withdraw/create via voice (PR #34)
 - Voice Phase 3 merged: SET_BUDGET create/update monthly budget via voice (PR #33)

@@ -25,13 +25,6 @@ from telegram_bot.voice.metrics import log_voice_event
 
 logger = logging.getLogger(__name__)
 
-STUB_MESSAGES = {
-    VoiceIntentType.ASK_ADVISOR: (
-        '🎤 Финансовый консультант в разработке.\n'
-        'Твой вопрос сохранён — вернёмся к этому позже.'
-    ),
-}
-
 
 class VoiceRouter:
     def __init__(self) -> None:
@@ -265,16 +258,25 @@ class VoiceRouter:
             )
             return
 
-        if command.intent in STUB_MESSAGES:
-            if command.intent == VoiceIntentType.ASK_ADVISOR:
-                logger.info(
-                    'Voice advisor stub query user=%s text=%r',
-                    telegram_user.telegram_id,
-                    command.raw_transcript,
+        if command.intent == VoiceIntentType.ASK_ADVISOR:
+            if command.should_reject():
+                await self._executor.send_error(
+                    update,
+                    context,
+                    command.error or 'Не понял вопрос. Попробуй ещё раз.',
+                    voice_transcript=command.raw_transcript,
                 )
-            await context.bot.send_message(
-                chat_id=update.effective_chat.id,
-                text=STUB_MESSAGES[command.intent],
+                return
+            log_voice_event(
+                'route',
+                intent=command.intent.value,
+                outcome='advisor',
+            )
+            await self._executor.execute_ask_advisor(
+                update,
+                context,
+                telegram_user,
+                command,
             )
             return
 
