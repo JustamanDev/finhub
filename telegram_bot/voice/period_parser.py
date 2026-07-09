@@ -115,8 +115,10 @@ def parse_advisor_period(question: str, today: date | None = None) -> ParsedPeri
         # previous month is always available via previous_period / MoM.
         used_as_comparison_baseline = bool(
             re.search(
-                r'(с\s+прошл\w*\s+месяц|чем\s+в\s+прошл|против\s+прошл|'
-                r'относительно\s+прошл)',
+                r'(с\s+(?:прошл\w*|предыдущ\w*)\s+месяц|'
+                r'чем\s+в\s+(?:прошл|предыдущ)|'
+                r'против\s+(?:прошл|предыдущ)|'
+                r'относительно\s+(?:прошл|предыдущ))',
                 text,
             )
         )

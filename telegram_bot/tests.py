@@ -1225,14 +1225,15 @@ class AdvisorPeriodParserTests(TestCase):
         from telegram_bot.voice.period_parser import parse_advisor_period
 
         today = date(2026, 7, 9)
-        period = parse_advisor_period(
+        for phrase in (
             'сравни расходы с прошлым месяцем',
-            today,
-        )
-        self.assertTrue(period.wants_comparison)
-        # Primary stays current; previous is MoM baseline in snapshot.
-        self.assertEqual((period.year, period.month), (2026, 7))
-        self.assertTrue(period.is_current)
+            'сравни расходы с предыдущим месяцем',
+        ):
+            period = parse_advisor_period(phrase, today)
+            self.assertTrue(period.wants_comparison, phrase)
+            # Primary stays current; previous is MoM baseline in snapshot.
+            self.assertEqual((period.year, period.month), (2026, 7), phrase)
+            self.assertTrue(period.is_current, phrase)
 
     def test_compare_previous_as_subject(self):
         from datetime import date
