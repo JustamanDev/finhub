@@ -1240,7 +1240,19 @@ class AdvisorPeriodParserTests(TestCase):
 
         today = date(2026, 7, 9)
         period = parse_advisor_period(
-            'сравни прошлый месяц с позапрошлым',
+            'сравни прошлый месяц с позапрошлым месяцем',
+            today,
+        )
+        self.assertTrue(period.wants_comparison)
+        self.assertEqual((period.year, period.month), (2026, 6))
+
+    def test_compare_genitive_previous_as_subject(self):
+        from datetime import date
+        from telegram_bot.voice.period_parser import parse_advisor_period
+
+        today = date(2026, 7, 9)
+        period = parse_advisor_period(
+            'сравни расходы прошлого месяца с позапрошлым',
             today,
         )
         self.assertTrue(period.wants_comparison)
