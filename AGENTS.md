@@ -39,6 +39,7 @@
 5. **Settings:** `finhub/settings/{base,development,production}.py`; окружение через `DJANGO_ENVIRONMENT`.
 6. **Бот async:** blocking I/O только через `asyncio.to_thread` или ORM async (`aget`, `acreate`).
 7. **Тесты:** SQLite in-memory при `manage.py test`.
+8. **Ревью перед PR** — skill `review-protocol` (anti-loop): только P0/P1, max 3 раунда Bugbot, P2 в backlog. Не использовать «maximally critical» без severity gate.
 
 ## Ключевые команды
 
