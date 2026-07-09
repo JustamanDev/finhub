@@ -15,6 +15,7 @@ from budgets.models import Budget
 from telegram_bot.services.goal_service import GoalService
 from telegram_bot.services.report_service import ReportService
 from telegram_bot.services.transaction_service import TransactionService
+from telegram_bot.voice.period_parser import ParsedPeriod, parse_advisor_period
 
 logger = logging.getLogger(__name__)
 
@@ -25,60 +26,59 @@ def _money(value: Decimal | int | float | None) -> float:
     return float(Decimal(str(value)).quantize(Decimal('0.01')))
 
 
+def _prev_month(year: int, month: int) -> tuple[int, int]:
+    if month == 1:
+        return year - 1, 12
+    return year, month - 1
+
+
 class AdvisorSnapshotService:
     def __init__(self, user: User) -> None:
         self.user = user
 
-    async def build(self, today: date | None = None) -> dict[str, Any]:
+    async def build(
+        self,
+        today: date | None = None,
+        *,
+        period: ParsedPeriod | None = None,
+        question: str | None = None,
+    ) -> dict[str, Any]:
         today = today or timezone.localdate()
-        year, month = today.year, today.month
+        if period is None:
+            period = parse_advisor_period(question or '', today)
 
+        year, month = period.year, period.month
         report = await ReportService(self.user).get_monthly_report(year, month)
         goal_service = GoalService(self.user)
         free_funds = await goal_service.get_free_funds_for_month(
             date(year, month, 1),
         )
-        today_stats = await TransactionService(self.user).get_today_statistics()
 
-        expense_categories: list[dict[str, Any]] = []
-        income_categories: list[dict[str, Any]] = []
-        for name, stat in (report.get('categories') or {}).items():
-            expense = _money(stat.get('expense'))
-            income = _money(stat.get('income'))
-            count = int(stat.get('transaction_count') or 0)
-            if expense > 0 or (stat.get('category') and getattr(
-                stat['category'], 'type', None,
-            ) == 'expense' and count):
-                row = {
-                    'name': name,
-                    'spent': expense,
-                    'transactions': count,
-                    'budget_remaining': _money(stat.get('balance')),
-                }
-                if expense > 0 or row['budget_remaining'] != 0:
-                    expense_categories.append(row)
-            if income > 0:
-                income_categories.append({
-                    'name': name,
-                    'received': income,
-                    'transactions': count,
-                })
+        expense_categories, income_categories = self._split_category_stats(report)
 
-        expense_categories.sort(key=lambda r: r['spent'], reverse=True)
-        income_categories.sort(key=lambda r: r['received'], reverse=True)
-
-        budgets = await self._active_month_budgets(today)
+        budgets = await self._month_budgets(year, month)
         goals = await self._goals_summary(goal_service)
         recommendations = await goal_service.get_budget_underuse_recommendations(
             today=today,
         )
 
-        return {
+        prev_year, prev_month = _prev_month(year, month)
+        prev_report = await ReportService(self.user).get_monthly_report(
+            prev_year,
+            prev_month,
+        )
+        prev_free = await goal_service.get_free_funds_for_month(
+            date(prev_year, prev_month, 1),
+        )
+        comparison = self._build_comparison(report, prev_report, free_funds, prev_free)
+
+        snapshot: dict[str, Any] = {
             'as_of': today.isoformat(),
             'period': {
                 'year': year,
                 'month': month,
-                'name': report.get('period_name') or f'{month}.{year}',
+                'name': period.label or report.get('period_name') or f'{month}.{year}',
+                'is_current': period.is_current,
             },
             'month_totals': {
                 'income': _money(report.get('total_income')),
@@ -86,11 +86,16 @@ class AdvisorSnapshotService:
                 'balance': _money(report.get('balance')),
                 'free_funds': _money(free_funds),
             },
-            'today': {
-                'income': _money(today_stats.get('income')),
-                'expenses': _money(today_stats.get('expenses')),
-                'balance': _money(today_stats.get('balance')),
+            'previous_period': {
+                'year': prev_year,
+                'month': prev_month,
+                'name': prev_report.get('period_name') or f'{prev_month}.{prev_year}',
+                'income': _money(prev_report.get('total_income')),
+                'expenses': _money(prev_report.get('total_expenses')),
+                'balance': _money(prev_report.get('balance')),
+                'free_funds': _money(prev_free),
             },
+            'comparison_vs_previous': comparison,
             'top_expense_categories': expense_categories[:8],
             'top_income_categories': income_categories[:5],
             'budgets': budgets,
@@ -105,8 +110,79 @@ class AdvisorSnapshotService:
             ],
         }
 
-    async def _active_month_budgets(self, today: date) -> list[dict[str, Any]]:
-        start = date(today.year, today.month, 1)
+        if period.is_current:
+            today_stats = await TransactionService(self.user).get_today_statistics()
+            snapshot['today'] = {
+                'income': _money(today_stats.get('income')),
+                'expenses': _money(today_stats.get('expenses')),
+                'balance': _money(today_stats.get('balance')),
+            }
+        else:
+            snapshot['today'] = None
+
+        return snapshot
+
+    def _split_category_stats(
+        self,
+        report: dict[str, Any],
+    ) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+        expense_categories: list[dict[str, Any]] = []
+        income_categories: list[dict[str, Any]] = []
+        for name, stat in (report.get('categories') or {}).items():
+            expense = _money(stat.get('expense'))
+            income = _money(stat.get('income'))
+            count = int(stat.get('transaction_count') or 0)
+            if expense > 0 or (
+                stat.get('category')
+                and getattr(stat['category'], 'type', None) == 'expense'
+                and count
+            ):
+                row = {
+                    'name': name,
+                    'spent': expense,
+                    'transactions': count,
+                    'budget_remaining': _money(stat.get('balance')),
+                }
+                if expense > 0 or row['budget_remaining'] != 0:
+                    expense_categories.append(row)
+            if income > 0:
+                income_categories.append({
+                    'name': name,
+                    'received': income,
+                    'transactions': count,
+                })
+        expense_categories.sort(key=lambda r: r['spent'], reverse=True)
+        income_categories.sort(key=lambda r: r['received'], reverse=True)
+        return expense_categories, income_categories
+
+    def _build_comparison(
+        self,
+        report: dict[str, Any],
+        prev_report: dict[str, Any],
+        free_funds: Decimal,
+        prev_free: Decimal,
+    ) -> dict[str, Any]:
+        cur_exp = _money(report.get('total_expenses'))
+        prev_exp = _money(prev_report.get('total_expenses'))
+        cur_inc = _money(report.get('total_income'))
+        prev_inc = _money(prev_report.get('total_income'))
+        return {
+            'expenses_delta': round(cur_exp - prev_exp, 2),
+            'income_delta': round(cur_inc - prev_inc, 2),
+            'balance_delta': round(
+                _money(report.get('balance')) - _money(prev_report.get('balance')),
+                2,
+            ),
+            'free_funds_delta': round(_money(free_funds) - _money(prev_free), 2),
+            'expenses_changed_percent': (
+                round((cur_exp - prev_exp) / prev_exp * 100, 1)
+                if prev_exp
+                else None
+            ),
+        }
+
+    async def _month_budgets(self, year: int, month: int) -> list[dict[str, Any]]:
+        start = date(year, month, 1)
         budgets = await sync_to_async(list)(
             Budget.objects.filter(
                 user=self.user,
