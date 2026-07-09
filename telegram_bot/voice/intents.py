@@ -50,7 +50,16 @@ class ParsedVoiceCommand:
         return True
 
     def should_reject(self) -> bool:
-        return not self.success or self.confidence < CONFIDENCE_CONFIRM
+        if not self.success:
+            return True
+        if self.intent != VoiceIntentType.CREATE_TRANSACTION:
+            return self.confidence < CONFIDENCE_CONFIRM
+        # Partial create (missing amount) → dialog, not hard reject.
+        if self.amount is None and (
+            self.category_name or self.category or self.confidence >= CONFIDENCE_CONFIRM
+        ):
+            return False
+        return self.confidence < CONFIDENCE_CONFIRM
 
     def to_executor_dict(self) -> dict[str, Any]:
         """Формат, совместимый с TextCommandParser / CommandExecutor."""

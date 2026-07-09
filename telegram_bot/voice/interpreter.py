@@ -283,12 +283,31 @@ class VoiceInterpreter:
                 )
 
         if amount is None:
+            # Partial command (e.g. «зарплата») — dialog asks for amount.
+            category = None
+            if category_name:
+                from telegram_bot.voice.category_resolver import (
+                    CategoryResolver,
+                    ResolveStatus,
+                )
+
+                resolved = CategoryResolver(self.user).resolve(
+                    category_name,
+                    transaction_type,
+                )
+                if resolved.status == ResolveStatus.MATCHED:
+                    category = resolved.match
             return ParsedVoiceCommand(
                 intent=VoiceIntentType.CREATE_TRANSACTION,
-                success=False,
-                confidence=min(confidence, 0.4),
+                success=True,
+                confidence=max(confidence, 0.6),
                 raw_transcript=text,
-                error='Сумма не распознана. Повторите, например: «расход 300 продукты».',
+                transaction_type=transaction_type,
+                amount=None,
+                category_name=category_name or None,
+                category=category,
+                description=(payload.get('description') or '').strip(),
+                command_type='amount_category' if category_name else None,
             )
 
         category = None

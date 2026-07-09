@@ -17,7 +17,7 @@
 
 ## В работе
 
-- [ ] **Voice Assistant v2** — Phase 1 category intelligence, ветка `feature/voice-phase-1-category-intelligence`
+- [ ] **Voice Assistant v2** — Phase 2 dialog manager, ветка `feature/voice-phase-2-dialog-manager`
 
 ## Недавно завершено
 

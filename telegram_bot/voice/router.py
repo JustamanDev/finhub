@@ -8,6 +8,7 @@ from telegram import Update
 from telegram.ext import ContextTypes
 
 from telegram_bot.services.command_executor import CommandExecutor
+from telegram_bot.voice.dialog import VoiceDialogManager, missing_slots_for_create
 from telegram_bot.voice.intents import ParsedVoiceCommand, VoiceIntentType
 
 logger = logging.getLogger(__name__)
@@ -31,6 +32,7 @@ STUB_MESSAGES = {
 class VoiceRouter:
     def __init__(self) -> None:
         self._executor = CommandExecutor()
+        self._dialog = VoiceDialogManager()
 
     async def route(
         self,
@@ -49,12 +51,22 @@ class VoiceRouter:
                 )
                 return
 
-            # Named category not resolved → disambiguate / create offer (no binary confirm).
-            if (
-                command.command_type == 'amount_category'
-                and command.category_name
-                and not command.category
-            ):
+            missing = missing_slots_for_create(command)
+            dialog_slots = [
+                slot for slot in missing if slot in ('amount', 'transaction_type')
+            ]
+            if dialog_slots:
+                await self._dialog.start_from_command(
+                    update,
+                    context,
+                    telegram_user,
+                    command,
+                    missing,
+                )
+                return
+
+            # Named category not resolved → disambiguate / create offer.
+            if 'category' in missing:
                 await self._executor.prompt_category_resolution(
                     update,
                     context,

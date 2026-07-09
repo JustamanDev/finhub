@@ -466,6 +466,31 @@ class TextHandler(BaseHandler):
                     user_state,
                 )
                 return
+
+            # Voice multi-turn dialog (after wizards / category picker)
+            from telegram_bot.voice.dialog import (
+                VoiceDialogManager,
+                clear_dialog,
+                get_dialog,
+                is_dialog_expired,
+            )
+
+            dialog = get_dialog(context)
+            if dialog:
+                if is_dialog_expired(dialog):
+                    clear_dialog(context)
+                    await context.bot.send_message(
+                        chat_id=update.effective_chat.id,
+                        text='⏱ Диалог устарел. Отправьте команду заново.',
+                    )
+                    return
+                await VoiceDialogManager().continue_dialog(
+                    update,
+                    context,
+                    telegram_user,
+                    message_text,
+                )
+                return
             
             # Логируем входящее сообщение
             await self.log_message(
