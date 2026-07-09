@@ -11,6 +11,7 @@ from telegram.ext import ContextTypes
 
 from telegram_bot.handlers.base import BaseHandler
 from telegram_bot.handlers.text_handler import TextHandler
+from telegram_bot.services.command_executor import VOICE_PENDING_KEY
 from telegram_bot.voice.audio_download import (
     cleanup_paths,
     extract_incoming_audio,
@@ -90,6 +91,22 @@ class VoiceHandler(BaseHandler):
             transcript = await asyncio.to_thread(transcribe, audio_path)
 
             await status_message.edit_text(f'🎤 Распознано: «{transcript.strip()}»')
+
+            if context.user_data.get(VOICE_PENDING_KEY):
+                await context.bot.send_message(
+                    chat_id=update.effective_chat.id,
+                    text=(
+                        'Есть неподтверждённая голосовая команда. '
+                        'Нажмите ✅ Да или ❌ Отмена в сообщении выше.'
+                    ),
+                )
+                return
+
+            user_state = await self.get_user_state(telegram_user)
+            if user_state.awaiting_category or user_state.awaiting_category_creation:
+                context.user_data['_voice_text_override'] = transcript.strip()
+                await self._text_handler.handle_text_message(update, context)
+                return
 
             if _is_interactive_state(context):
                 context.user_data['_voice_text_override'] = transcript.strip()

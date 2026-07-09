@@ -46,10 +46,11 @@ class TextHandler(BaseHandler):
         update: Update,
         context: ContextTypes.DEFAULT_TYPE,
         telegram_user,
+        message_text: str,
     ) -> None:
         step = context.user_data.get('goal_creation_step')
         data = context.user_data.get('goal_creation_data', {})
-        text = update.message.text.strip()
+        text = message_text.strip()
 
         from telegram_bot.keyboards.goals import GoalsKeyboard
         from decimal import InvalidOperation
@@ -194,11 +195,12 @@ class TextHandler(BaseHandler):
         context: ContextTypes.DEFAULT_TYPE,
         telegram_user,
         goal_id: int,
+        message_text: str,
     ) -> None:
         from telegram_bot.handlers.goals_handler import GoalsHandler
 
         try:
-            amount = self._parse_money(update.message.text)
+            amount = self._parse_money(message_text)
             if amount <= 0:
                 raise ValueError("amount<=0")
             user = await sync_to_async(lambda: telegram_user.user)()
@@ -221,11 +223,12 @@ class TextHandler(BaseHandler):
         context: ContextTypes.DEFAULT_TYPE,
         telegram_user,
         goal_id: int,
+        message_text: str,
     ) -> None:
         from telegram_bot.handlers.goals_handler import GoalsHandler
 
         try:
-            amount = self._parse_money(update.message.text)
+            amount = self._parse_money(message_text)
             if amount <= 0:
                 raise ValueError("amount<=0")
             user = await sync_to_async(lambda: telegram_user.user)()
@@ -285,17 +288,34 @@ class TextHandler(BaseHandler):
             # --- Цели: создание / пополнение / снятие ---
             goal_creation_step = context.user_data.get('goal_creation_step')
             if goal_creation_step:
-                await self._handle_goal_creation_input(update, context, telegram_user)
+                await self._handle_goal_creation_input(
+                    update,
+                    context,
+                    telegram_user,
+                    message_text,
+                )
                 return
 
             if context.user_data.get('goal_deposit_goal_id'):
                 goal_id = context.user_data.get('goal_deposit_goal_id')
-                await self._handle_goal_deposit_input(update, context, telegram_user, goal_id)
+                await self._handle_goal_deposit_input(
+                    update,
+                    context,
+                    telegram_user,
+                    goal_id,
+                    message_text,
+                )
                 return
 
             if context.user_data.get('goal_withdraw_goal_id'):
                 goal_id = context.user_data.get('goal_withdraw_goal_id')
-                await self._handle_goal_withdraw_input(update, context, telegram_user, goal_id)
+                await self._handle_goal_withdraw_input(
+                    update,
+                    context,
+                    telegram_user,
+                    goal_id,
+                    message_text,
+                )
                 return
             
             # --- Обработка состояний редактирования (дата/комментарий) ---
@@ -401,6 +421,16 @@ class TextHandler(BaseHandler):
 
             # Проверяем, ожидается ли создание категории
             user_state = await self.get_user_state(telegram_user)
+
+            if user_state.awaiting_category and user_state.current_amount:
+                await self._handle_awaiting_category_input(
+                    update,
+                    context,
+                    telegram_user,
+                    message_text,
+                    user_state,
+                )
+                return
             
             if user_state.awaiting_category_creation:
                 await self._handle_category_creation(
@@ -486,6 +516,62 @@ class TextHandler(BaseHandler):
         except Exception as e:
             logger.error(f"❌ Ошибка в handle_text_message: {e}")
             await self.handle_error(update, context, e)
+    
+    async def _handle_awaiting_category_input(
+        self,
+        update: Update,
+        context: ContextTypes.DEFAULT_TYPE,
+        telegram_user,
+        message_text: str,
+        user_state,
+    ) -> None:
+        """Завершает amount_only flow: пользователь назвал категорию текстом/голосом."""
+        user = await sync_to_async(lambda: telegram_user.user)()
+        parser = await sync_to_async(self.get_parser)(user)
+        transaction_type = user_state.last_transaction_type or 'expense'
+        category_name = message_text.strip()
+
+        category = await sync_to_async(parser._find_category)(
+            category_name,
+            transaction_type,
+        )
+        if not category:
+            await self._command_executor.send_category_selection(
+                update,
+                context,
+                telegram_user,
+                user_state.current_amount,
+                transaction_type,
+                prefix_message=f"Категория '{category_name}' не найдена.",
+                voice_transcript=message_text,
+            )
+            return
+
+        try:
+            transaction = await TransactionService(user).create_transaction(
+                amount=user_state.current_amount,
+                category=category,
+                transaction_type=transaction_type,
+            )
+            user_state.current_amount = None
+            user_state.awaiting_category = False
+            user_state.last_transaction_type = transaction_type
+            await user_state.asave()
+
+            await self._command_executor.send_transaction_created(
+                update,
+                context,
+                transaction,
+                voice_transcript=message_text,
+            )
+        except Exception as exc:
+            logger.error('Awaiting category transaction error: %s', exc)
+            await self._command_executor.send_error(
+                update,
+                context,
+                f'Ошибка создания транзакции: {exc}',
+                voice_transcript=message_text,
+            )
     
     async def _handle_amount_category(
         self,

@@ -66,6 +66,13 @@ NATURAL_VOICE_RE = re.compile(
     r'(?:в\s+)?(?:категори(?:ю|и)\s+)?(.+?)[.\s]*$'
 )
 
+NATURAL_INCOME_VOICE_RE = re.compile(
+    r'(?i)^(?:получил|заработал|доход|зачисли|пришло|зарплата)\s+'
+    r'(\d+(?:[.,]\d+)?)\s*'
+    r'(?:руб(?:лей|ля|ль)?\.?\s*)?'
+    r'(?:на\s+)?(?:категори(?:ю|и)\s+)?(.+?)[.\s]*$'
+)
+
 
 def _normalize_transcript(text: str) -> str:
     cleaned = text.strip().replace('\u00a0', ' ')
@@ -80,6 +87,15 @@ def _compact_natural_phrase(text: str) -> str | None:
         return None
     amount, category = match.groups()
     return f'{amount} {category.strip().strip(".")}'
+
+
+def _compact_natural_income_phrase(text: str) -> str | None:
+    """«Получил 5000 зарплата» → «+5000 зарплата»."""
+    match = NATURAL_INCOME_VOICE_RE.match(text)
+    if not match:
+        return None
+    amount, category = match.groups()
+    return f'+{amount} {category.strip().strip(".")}'
 
 
 class VoiceInterpreter:
@@ -106,7 +122,12 @@ class VoiceInterpreter:
         return self._interpret_with_llm(text)
 
     def _try_regex_fast_path(self, text: str) -> ParsedVoiceCommand | None:
-        for candidate in (text, _compact_natural_phrase(text)):
+        candidates = (
+            text,
+            _compact_natural_phrase(text),
+            _compact_natural_income_phrase(text),
+        )
+        for candidate in candidates:
             if not candidate:
                 continue
             parsed = self._parser.parse(candidate)
@@ -122,6 +143,7 @@ class VoiceInterpreter:
                     amount=parsed['amount'],
                     category_name=parsed.get('category_name'),
                     category=parsed.get('category'),
+                    description=parsed.get('description') or '',
                     command_type='amount_category',
                 )
             if parsed['type'] == 'amount_only':

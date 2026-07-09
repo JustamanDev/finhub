@@ -81,6 +81,16 @@ class CommandExecutor:
         telegram_user,
         command: ParsedVoiceCommand,
     ) -> None:
+        if context.user_data.get(VOICE_PENDING_KEY):
+            await context.bot.send_message(
+                chat_id=update.effective_chat.id,
+                text=(
+                    'Сначала подтвердите или отмените предыдущую '
+                    'голосовую команду (✅ / ❌).'
+                ),
+            )
+            return
+
         context.user_data[VOICE_PENDING_KEY] = {
             'command': command,
         }

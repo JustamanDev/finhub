@@ -17,7 +17,7 @@
 
 ## В работе
 
-- (нет)
+- [ ] **Voice Assistant v2** — Phase 0 PR pending, план: `docs/agent/voice-assistant-v2.md`
 
 ## Недавно завершено
 
