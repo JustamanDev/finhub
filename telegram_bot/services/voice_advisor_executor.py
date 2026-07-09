@@ -45,6 +45,8 @@ def _snapshot_has_signal(snapshot: dict[str, Any]) -> bool:
         return True
     if snapshot.get('top_expense_categories') or snapshot.get('top_income_categories'):
         return True
+    if snapshot.get('suggestions'):
+        return True
     return False
 
 
