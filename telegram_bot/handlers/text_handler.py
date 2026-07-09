@@ -556,23 +556,28 @@ class TextHandler(BaseHandler):
             return
 
         lookup_name = raw_text
+        resolved_category = None
+        tx_amount = amount
+
         if parsed.get('success') and parsed.get('type') == 'amount_category':
             lookup_name = parsed.get('category_name') or raw_text
+            if parsed.get('category'):
+                resolved_category = parsed['category']
+            if parsed.get('amount') is not None and parsed['amount'] != amount:
+                tx_amount = parsed['amount']
 
-        category = None
-        if (
-            parsed.get('success')
-            and parsed.get('type') == 'amount_category'
-            and parsed.get('category')
-        ):
-            category = parsed['category']
-        else:
-            category = await sync_to_async(parser._find_category)(
+        if not resolved_category:
+            resolved_category = await sync_to_async(parser._find_category)(
                 lookup_name,
                 transaction_type,
             )
+            if not resolved_category:
+                resolved_category = await sync_to_async(parser._find_category)(
+                    lookup_name,
+                    'income' if transaction_type == 'expense' else 'expense',
+                )
 
-        if not category:
+        if not resolved_category:
             await self._command_executor.send_category_selection(
                 update,
                 context,
@@ -586,12 +591,13 @@ class TextHandler(BaseHandler):
 
         try:
             transaction = await TransactionService(user).create_transaction(
-                amount=amount,
-                category=category,
-                transaction_type=transaction_type,
+                amount=tx_amount,
+                category=resolved_category,
+                transaction_type=resolved_category.type,
             )
             user_state.current_amount = None
             user_state.awaiting_category = False
+            user_state.last_transaction_type = resolved_category.type
             await user_state.asave()
 
             await self._command_executor.send_transaction_created(
