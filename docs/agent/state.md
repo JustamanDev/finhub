@@ -17,10 +17,12 @@
 
 ## В работе
 
-- [ ] ASK_ADVISOR расширения (тренды, произвольный период) — backlog
+- [ ] ASK_ADVISOR extensions (trends, richer analytics) — backlog after periods
 
 ## Недавно завершено
 
+- [x] **ASK_ADVISOR v2 periods** — прошлый месяц / named month / MoM в snapshot
+- [x] **Fix voice budget parse** — category-then-amount + spoken dialog amount ([PR #40](https://github.com/JustamanDev/finhub/pull/40))
 - [x] **ASK_ADVISOR MVP** — grounded LLM по snapshot ([PR #38](https://github.com/JustamanDev/finhub/pull/38))
 - [x] **Voice Phase 5** — hardening: spoken numbers, metrics, Whisper context ([PR #36](https://github.com/JustamanDev/finhub/pull/36))
 - [x] **Voice Phase 4** — MANAGE_GOAL deposit/withdraw/create ([PR #34](https://github.com/JustamanDev/finhub/pull/34))
@@ -45,6 +47,8 @@
 ## Changelog (компактно)
 
 ### 2026-07-09
+- ASK_ADVISOR v2 periods: period parser + MoM comparison in snapshot
+- Fix voice budget parse: category-then-amount + spoken dialog amount (PR #40)
 - ASK_ADVISOR MVP merged: snapshot + grounded LLM financial answers (PR #38)
 - Voice Phase 5 merged: spoken numbers, voice metrics, Whisper category prompt (PR #36)
 - Voice Phase 4 merged: MANAGE_GOAL deposit/withdraw/create via voice (PR #34)

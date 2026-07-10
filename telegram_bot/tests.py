@@ -1095,6 +1095,12 @@ class AdvisorSnapshotTests(TestCase):
                 'balance': 0,
                 'free_funds': 0,
             },
+            'previous_period': {
+                'income': 0,
+                'expenses': 0,
+                'balance': 0,
+                'free_funds': 0,
+            },
             'today': {'income': 0, 'expenses': 0, 'balance': 0},
             'top_expense_categories': [],
             'top_income_categories': [],
@@ -1117,6 +1123,12 @@ class AdvisorSnapshotTests(TestCase):
                 'balance': 0,
                 'free_funds': 0,
             },
+            'previous_period': {
+                'income': 0,
+                'expenses': 0,
+                'balance': 0,
+                'free_funds': 0,
+            },
             'today': {'income': 0, 'expenses': 0, 'balance': 0},
             'top_expense_categories': [],
             'top_income_categories': [],
@@ -1131,6 +1143,121 @@ class AdvisorSnapshotTests(TestCase):
             ],
         }
         self.assertTrue(_snapshot_has_signal(snapshot))
+
+    def test_previous_month_snapshot(self):
+        from asgiref.sync import async_to_sync
+        from datetime import date
+        import calendar
+        from transactions.models import Transaction
+        from telegram_bot.services.advisor_snapshot_service import (
+            AdvisorSnapshotService,
+        )
+        from telegram_bot.voice.period_parser import parse_advisor_period
+
+        today = date.today()
+        if today.month == 1:
+            prev_year, prev_month = today.year - 1, 12
+        else:
+            prev_year, prev_month = today.year, today.month - 1
+        prev_day = min(15, calendar.monthrange(prev_year, prev_month)[1])
+        Transaction.objects.create(
+            user=self.user,
+            category=self.products,
+            amount=self.Decimal('-2200'),
+            date=date(prev_year, prev_month, prev_day),
+            description='prev',
+        )
+        period = parse_advisor_period(
+            'сколько потратил в прошлом месяце?',
+            today,
+        )
+        snapshot = async_to_sync(AdvisorSnapshotService(self.user).build)(
+            today=today,
+            period=period,
+        )
+        self.assertEqual(snapshot['period']['year'], prev_year)
+        self.assertEqual(snapshot['period']['month'], prev_month)
+        self.assertEqual(snapshot['month_totals']['expenses'], 2200.0)
+        self.assertIn('comparison_vs_previous', snapshot)
+        self.assertIsNone(snapshot['today'])
+
+
+class AdvisorPeriodParserTests(TestCase):
+    def test_current_default(self):
+        from datetime import date
+        from telegram_bot.voice.period_parser import parse_advisor_period
+
+        today = date(2026, 7, 9)
+        period = parse_advisor_period('сколько потратил?', today)
+        self.assertTrue(period.is_current)
+        self.assertEqual((period.year, period.month), (2026, 7))
+
+    def test_previous_month(self):
+        from datetime import date
+        from telegram_bot.voice.period_parser import parse_advisor_period
+
+        today = date(2026, 7, 9)
+        period = parse_advisor_period(
+            'Какие расходы в прошлом месяце?',
+            today,
+        )
+        self.assertEqual((period.year, period.month), (2026, 6))
+        self.assertFalse(period.is_current)
+
+    def test_named_month_and_year(self):
+        from datetime import date
+        from telegram_bot.voice.period_parser import parse_advisor_period
+
+        today = date(2026, 7, 9)
+        period = parse_advisor_period('сколько потратил в январе 2026?', today)
+        self.assertEqual((period.year, period.month), (2026, 1))
+
+    def test_named_month_rolls_year(self):
+        from datetime import date
+        from telegram_bot.voice.period_parser import parse_advisor_period
+
+        today = date(2026, 3, 5)
+        period = parse_advisor_period('траты за декабрь', today)
+        self.assertEqual((period.year, period.month), (2025, 12))
+
+    def test_comparison_flag(self):
+        from datetime import date
+        from telegram_bot.voice.period_parser import parse_advisor_period
+
+        today = date(2026, 7, 9)
+        for phrase in (
+            'сравни расходы с прошлым месяцем',
+            'сравни расходы с предыдущим месяцем',
+        ):
+            period = parse_advisor_period(phrase, today)
+            self.assertTrue(period.wants_comparison, phrase)
+            # Primary stays current; previous is MoM baseline in snapshot.
+            self.assertEqual((period.year, period.month), (2026, 7), phrase)
+            self.assertTrue(period.is_current, phrase)
+
+    def test_compare_previous_as_subject(self):
+        from datetime import date
+        from telegram_bot.voice.period_parser import parse_advisor_period
+
+        today = date(2026, 7, 9)
+        period = parse_advisor_period(
+            'сравни прошлый месяц с позапрошлым месяцем',
+            today,
+        )
+        self.assertTrue(period.wants_comparison)
+        self.assertEqual((period.year, period.month), (2026, 6))
+
+    def test_compare_genitive_previous_as_subject(self):
+        from datetime import date
+        from telegram_bot.voice.period_parser import parse_advisor_period
+
+        today = date(2026, 7, 9)
+        period = parse_advisor_period(
+            'сравни расходы прошлого месяца с позапрошлым',
+            today,
+        )
+        self.assertTrue(period.wants_comparison)
+        self.assertEqual((period.year, period.month), (2026, 6))
 
 
 class NumberWordsTests(TestCase):

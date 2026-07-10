@@ -34,12 +34,18 @@ def _format_empty_snapshot_reply(snapshot: dict[str, Any]) -> str:
 def _snapshot_has_signal(snapshot: dict[str, Any]) -> bool:
     totals = snapshot.get('month_totals') or {}
     today = snapshot.get('today') or {}
+    previous = snapshot.get('previous_period') or {}
     if any(
         float(totals.get(key) or 0) != 0
         for key in ('income', 'expenses', 'balance', 'free_funds')
     ):
         return True
     if any(float(today.get(key) or 0) != 0 for key in ('income', 'expenses')):
+        return True
+    if any(
+        float(previous.get(key) or 0) != 0
+        for key in ('income', 'expenses', 'balance', 'free_funds')
+    ):
         return True
     if snapshot.get('budgets') or snapshot.get('goals'):
         return True
@@ -86,6 +92,7 @@ def answer_from_snapshot(question: str, snapshot: dict[str, Any]) -> str:
                 'advisor_answer',
                 llm_ms=timing.get('ms'),
                 chars=len(text),
+                period=(snapshot.get('period') or {}).get('name'),
             )
             if not text:
                 return (
@@ -113,7 +120,12 @@ def answer_from_snapshot(question: str, snapshot: dict[str, Any]) -> str:
 
 
 async def answer_advisor_query(user: User, question: str) -> str:
-    snapshot = await AdvisorSnapshotService(user).build()
     from asgiref.sync import sync_to_async
+    from telegram_bot.voice.period_parser import parse_advisor_period
 
+    period = parse_advisor_period(question)
+    snapshot = await AdvisorSnapshotService(user).build(
+        period=period,
+        question=question,
+    )
     return await sync_to_async(answer_from_snapshot)(question, snapshot)

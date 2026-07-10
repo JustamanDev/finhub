@@ -32,7 +32,7 @@ Voice → Whisper → transcript → [regex fast path | LLM JSON] → CommandExe
 | `CREATE_TRANSACTION` | implemented |
 | `SET_BUDGET` | stub |
 | `MANAGE_GOAL` | stub |
-| `ASK_ADVISOR` | snapshot + grounded LLM answer |
+| `ASK_ADVISOR` | snapshot + grounded LLM; periods (прошлый/named month, MoM) |
 
 ## UX
 
