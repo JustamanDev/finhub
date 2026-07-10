@@ -60,6 +60,7 @@ class ParsedPeriod:
     is_current: bool = False
     wants_comparison: bool = False
     trend_months: int | None = None
+    category_hint: str | None = None
 
 
 def _shift_month(anchor: date, delta: int) -> date:
@@ -122,14 +123,58 @@ def parse_trend_months(question: str) -> int | None:
     return None
 
 
+_CATEGORY_STOP = (
+    r'за|в|с|по|как|растут|падают|растёт|растет|падает|месяц\w*|год\w*|'
+    r'полгода|квартал|прошл\w*|предыдущ\w*|этот|этом|этого|динамик\w*|'
+    r'тренд\w*|сравн\w*|часто|был|была|было|ли|или|и|а|но'
+)
+
+
+def parse_category_hint(question: str) -> str | None:
+    """Extract a spoken category fragment from an advisor question."""
+    text = (question or '').lower().replace('ё', 'е')
+    patterns = (
+        r'по\s+категории\s+([а-яa-z0-9][а-яa-z0-9\s\-]{1,40})',
+        r'(?:трат\w*|расход\w*|тратил\w*|потратил\w*|потрачен\w*|'
+        r'динамик\w*|тренд\w*|менял\w*)'
+        r'.{0,30}?\s+на\s+([а-яa-z0-9][а-яa-z0-9\s\-]{1,40})',
+        r'\sна\s+([а-яa-z0-9][а-яa-z0-9\s\-]{1,40})',
+    )
+    for pattern in patterns:
+        match = re.search(pattern, text)
+        if not match:
+            continue
+        raw = match.group(1).strip(' .,!?')
+        raw = re.split(rf'\s+(?:{_CATEGORY_STOP})\b', raw, maxsplit=1)[0]
+        raw = raw.strip(' .,!?-')
+        if len(raw) < 2:
+            continue
+        # Skip pure time words mistaken for categories
+        if re.fullmatch(
+            r'(год|месяц|квартал|полгода|прошлый|предыдущий|этот)',
+            raw,
+        ):
+            continue
+        return raw
+    return None
+
+
 def parse_advisor_period(question: str, today: date | None = None) -> ParsedPeriod:
     """Extract target calendar month from a Russian advisor question."""
     today = today or date.today()
     text = (question or '').lower().replace('ё', 'е')
     trend_months = parse_trend_months(text)
+    category_hint = parse_category_hint(text)
+    # Category + growth/decline wording implies a multi-month lookback
+    if category_hint and trend_months is None and re.search(
+        r'(растут|падают|растёт|растет|падает|менял\w*|динамик\w*|тренд\w*)',
+        text,
+    ):
+        trend_months = DEFAULT_TREND_MONTHS
     wants_comparison = bool(
         re.search(
-            r'(сравн|против|чем\s+в\s+прошл|динамика|тренд|разниц)',
+            r'(сравн|против|чем\s+в\s+прошл|динамика|тренд|разниц|'
+            r'растут|падают|растёт|растет|падает)',
             text,
         ),
     ) or trend_months is not None
@@ -144,6 +189,7 @@ def parse_advisor_period(question: str, today: date | None = None) -> ParsedPeri
             label=_month_label(target.year, target.month),
             wants_comparison=True,
             trend_months=trend_months,
+            category_hint=category_hint,
         )
 
     if re.search(r'позапрошл\w*\s+месяц', text):
@@ -156,6 +202,7 @@ def parse_advisor_period(question: str, today: date | None = None) -> ParsedPeri
                 label=_month_label(target.year, target.month),
                 wants_comparison=True,
                 trend_months=trend_months,
+                category_hint=category_hint,
             )
 
     if re.search(r'(прошл\w*|предыдущ\w*)\s+месяц', text):
@@ -178,6 +225,7 @@ def parse_advisor_period(question: str, today: date | None = None) -> ParsedPeri
                 label=_month_label(target.year, target.month),
                 wants_comparison=wants_comparison,
                 trend_months=trend_months,
+                category_hint=category_hint,
             )
 
     # Explicit month name + optional year: «в январе», «за март 2025»
@@ -199,6 +247,7 @@ def parse_advisor_period(question: str, today: date | None = None) -> ParsedPeri
             is_current=(year == today.year and month == today.month),
             wants_comparison=wants_comparison,
             trend_months=trend_months,
+            category_hint=category_hint,
         )
 
     return ParsedPeriod(
@@ -208,4 +257,5 @@ def parse_advisor_period(question: str, today: date | None = None) -> ParsedPeri
         is_current=True,
         wants_comparison=wants_comparison,
         trend_months=trend_months,
+        category_hint=category_hint,
     )
