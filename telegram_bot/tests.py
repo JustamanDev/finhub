@@ -1227,6 +1227,88 @@ class AdvisorSnapshotTests(TestCase):
         self.assertEqual(trend['peak_expenses_month'], series[1]['name'])
         self.assertEqual(trend['expenses_direction'], 'up')
 
+    def test_cashflow_and_budget_health(self):
+        from asgiref.sync import async_to_sync
+        from datetime import date
+        from telegram_bot.services.advisor_snapshot_service import (
+            AdvisorSnapshotService,
+        )
+
+        today = date(2026, 7, 15)
+        snapshot = async_to_sync(AdvisorSnapshotService(self.user).build)(
+            today=today,
+        )
+        cashflow = snapshot['cashflow']
+        self.assertEqual(cashflow['expenses'], 1500.0)
+        self.assertEqual(cashflow['days_in_month'], 31)
+        self.assertEqual(cashflow['days_elapsed'], 15)
+        self.assertEqual(cashflow['days_remaining'], 16)
+        self.assertEqual(cashflow['avg_daily_expenses'], 100.0)
+
+        health = snapshot['budget_health']
+        self.assertEqual(health['budget_count'], 1)
+        self.assertEqual(health['total_limit'], 5000.0)
+        self.assertEqual(health['total_spent'], 1500.0)
+        self.assertEqual(health['overspent_count'], 0)
+        # 1500/5000 = 30%, pace on day 15 ≈ 48.4% → not ahead
+        self.assertEqual(health['ahead_of_pace_count'], 0)
+        self.assertEqual(health['pace_percent'], round(15 / 31 * 100, 1))
+
+    def test_budget_health_overspent_and_at_risk(self):
+        from asgiref.sync import async_to_sync
+        from datetime import date
+        import calendar
+        from budgets.models import Budget
+        from transactions.models import Transaction
+        from telegram_bot.services.advisor_snapshot_service import (
+            AdvisorSnapshotService,
+        )
+
+        today = date(2026, 7, 10)
+        start = date(2026, 7, 1)
+        end = date(2026, 7, calendar.monthrange(2026, 7)[1])
+        taxi = Category.objects.create(
+            user=self.user,
+            name='Такси',
+            type='expense',
+            icon='🚕',
+        )
+        Budget.objects.create(
+            user=self.user,
+            category=taxi,
+            amount=self.Decimal('1000'),
+            period_type=Budget.MONTHLY,
+            start_date=start,
+            end_date=end,
+            is_active=True,
+        )
+        Transaction.objects.create(
+            user=self.user,
+            category=taxi,
+            amount=self.Decimal('-1200'),
+            date=today,
+            description='over',
+        )
+        # Push products budget into at-risk (≥80%): already 1500 of 5000 → add 2600
+        Transaction.objects.create(
+            user=self.user,
+            category=self.products,
+            amount=self.Decimal('-2600'),
+            date=today,
+            description='risk',
+        )
+
+        snapshot = async_to_sync(AdvisorSnapshotService(self.user).build)(
+            today=today,
+        )
+        health = snapshot['budget_health']
+        self.assertEqual(health['overspent_count'], 1)
+        self.assertEqual(health['overspent'][0]['category'], 'Такси')
+        self.assertEqual(health['at_risk_count'], 1)
+        self.assertEqual(health['at_risk'][0]['category'], 'Продукты')
+        # Products 4100/5000=82% > pace ~32% on day 10
+        self.assertGreaterEqual(health['ahead_of_pace_count'], 1)
+
 
 class AdvisorPeriodParserTests(TestCase):
     def test_current_default(self):

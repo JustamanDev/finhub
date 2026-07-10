@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import calendar
 import logging
 from datetime import date
 from decimal import Decimal
@@ -16,6 +17,8 @@ from telegram_bot.services.goal_service import GoalService
 from telegram_bot.services.report_service import ReportService
 from telegram_bot.services.transaction_service import TransactionService
 from telegram_bot.voice.period_parser import ParsedPeriod, parse_advisor_period
+
+AT_RISK_SPENT_PERCENT = 80.0
 
 logger = logging.getLogger(__name__)
 
@@ -99,6 +102,21 @@ class AdvisorSnapshotService:
             'top_expense_categories': expense_categories[:8],
             'top_income_categories': income_categories[:5],
             'budgets': budgets,
+            'budget_health': self._build_budget_health(
+                budgets,
+                year=year,
+                month=month,
+                today=today,
+                is_current=period.is_current,
+            ),
+            'cashflow': self._build_cashflow(
+                report,
+                free_funds,
+                year=year,
+                month=month,
+                today=today,
+                is_current=period.is_current,
+            ),
             'goals': goals,
             'suggestions': [
                 {
@@ -190,6 +208,105 @@ class AdvisorSnapshotService:
                 if prev_exp
                 else None
             ),
+        }
+
+    def _build_cashflow(
+        self,
+        report: dict[str, Any],
+        free_funds: Decimal,
+        *,
+        year: int,
+        month: int,
+        today: date,
+        is_current: bool,
+    ) -> dict[str, Any]:
+        income = _money(report.get('total_income'))
+        expenses = _money(report.get('total_expenses'))
+        balance = _money(report.get('balance'))
+        free = _money(free_funds)
+        days_in_month = calendar.monthrange(year, month)[1]
+        if is_current and today.year == year and today.month == month:
+            days_elapsed = today.day
+            days_remaining = max(days_in_month - today.day, 0)
+        else:
+            days_elapsed = days_in_month
+            days_remaining = 0
+        return {
+            'income': income,
+            'expenses': expenses,
+            'balance': balance,
+            'free_funds': free,
+            'savings_rate_percent': (
+                round(balance / income * 100, 1) if income else None
+            ),
+            'expense_ratio_percent': (
+                round(expenses / income * 100, 1) if income else None
+            ),
+            'days_in_month': days_in_month,
+            'days_elapsed': days_elapsed,
+            'days_remaining': days_remaining,
+            'avg_daily_expenses': (
+                round(expenses / days_elapsed, 2) if days_elapsed else 0.0
+            ),
+        }
+
+    def _build_budget_health(
+        self,
+        budgets: list[dict[str, Any]],
+        *,
+        year: int,
+        month: int,
+        today: date,
+        is_current: bool,
+    ) -> dict[str, Any]:
+        days_in_month = calendar.monthrange(year, month)[1]
+        if is_current and today.year == year and today.month == month:
+            pace_percent = round(today.day / days_in_month * 100, 1)
+        else:
+            pace_percent = 100.0
+
+        overspent: list[dict[str, Any]] = []
+        at_risk: list[dict[str, Any]] = []
+        ahead_of_pace: list[dict[str, Any]] = []
+        total_limit = 0.0
+        total_spent = 0.0
+        total_remaining = 0.0
+
+        for row in budgets:
+            total_limit += float(row.get('limit') or 0)
+            total_spent += float(row.get('spent') or 0)
+            total_remaining += float(row.get('remaining') or 0)
+            spent_percent = float(row.get('spent_percent') or 0)
+            item = {
+                'category': row.get('category'),
+                'limit': row.get('limit'),
+                'spent': row.get('spent'),
+                'remaining': row.get('remaining'),
+                'spent_percent': spent_percent,
+            }
+            if row.get('overspent'):
+                overspent.append(item)
+            elif spent_percent >= AT_RISK_SPENT_PERCENT:
+                at_risk.append(item)
+            if (
+                is_current
+                and not row.get('overspent')
+                and spent_percent > pace_percent
+            ):
+                ahead_of_pace.append(item)
+
+        return {
+            'budget_count': len(budgets),
+            'total_limit': round(total_limit, 2),
+            'total_spent': round(total_spent, 2),
+            'total_remaining': round(total_remaining, 2),
+            'overspent_count': len(overspent),
+            'at_risk_count': len(at_risk),
+            'ahead_of_pace_count': len(ahead_of_pace),
+            'pace_percent': pace_percent,
+            'overspent': overspent[:5],
+            'at_risk': at_risk[:5],
+            'ahead_of_pace': ahead_of_pace[:5],
         }
 
     async def _build_monthly_series(
