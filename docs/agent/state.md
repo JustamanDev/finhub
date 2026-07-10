@@ -21,7 +21,8 @@
 
 ## Недавно завершено
 
-- [x] **ASK_ADVISOR richer** — cashflow + budget_health (overspent / at_risk / pace)
+- [x] **Fix ASK_ADVISOR year lookback** — «за год» / минус / справлялся → 12 мес + deficit stats
+- [x] **ASK_ADVISOR richer** — cashflow + budget_health (overspent / at_risk / pace) ([PR #43](https://github.com/JustamanDev/finhub/pull/43))
 - [x] **ASK_ADVISOR trends** — monthly_series 3–6 мес + trend summary ([PR #42](https://github.com/JustamanDev/finhub/pull/42))
 - [x] **ASK_ADVISOR v2 periods** — прошлый месяц / named month / MoM в snapshot ([PR #41](https://github.com/JustamanDev/finhub/pull/41))
 - [x] **Fix voice budget parse** — category-then-amount + spoken dialog amount ([PR #40](https://github.com/JustamanDev/finhub/pull/40))
@@ -49,7 +50,8 @@
 ## Changelog (компактно)
 
 ### 2026-07-10
-- ASK_ADVISOR richer: cashflow + budget_health (overspent / at_risk / pace) in snapshot
+- Fix ASK_ADVISOR year lookback: «за год» → 12 months + deficit/surplus stats
+- ASK_ADVISOR richer: cashflow + budget_health (overspent / at_risk / pace) in snapshot (PR #43)
 - ASK_ADVISOR trends: monthly_series + trend summary for 3–6 months (PR #42)
 
 ### 2026-07-09

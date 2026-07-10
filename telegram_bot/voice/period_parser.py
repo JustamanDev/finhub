@@ -47,7 +47,7 @@ MONTH_FULL: dict[str, int] = {
 }
 
 # Cap multi-month series length for ASK_ADVISOR latency.
-MAX_TREND_MONTHS = 6
+MAX_TREND_MONTHS = 12
 DEFAULT_TREND_MONTHS = 6
 MIN_TREND_MONTHS = 3
 
@@ -91,6 +91,10 @@ def parse_trend_months(question: str) -> int | None:
     """Return multi-month window length if the question asks for a trend."""
     text = (question or '').lower().replace('ё', 'е')
 
+    if re.search(r'за\s+(?:последн\w*\s+)?год(?:\s|$|[?.!,])', text):
+        return 12
+    if re.search(r'за\s+(?:последн\w*\s+)?12\s+месяц', text):
+        return 12
     if re.search(r'за\s+полгода', text):
         return 6
     if re.search(r'за\s+квартал', text):
@@ -106,6 +110,14 @@ def parse_trend_months(question: str) -> int | None:
     # «как менялись расходы», «динамика», «тренд» — default window
     if re.search(r'(как\s+менял\w*|динамик\w*|тренд\w*)', text):
         return DEFAULT_TREND_MONTHS
+
+    # Coping / deficit overview without explicit window → year lookback
+    if re.search(
+        r'(справлял\w*|часто\s+.*\s+минус|был\s+минус|в\s+минусе|'
+        r'отрицательн\w*\s+баланс|более[- ]менее\s+нормальн)',
+        text,
+    ):
+        return 12
 
     return None
 

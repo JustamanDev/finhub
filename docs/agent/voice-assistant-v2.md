@@ -354,8 +354,9 @@ voice_dialog = {
 - [x] Prompt tuning per-user categories (Whisper prompt via `whisper_context.py`)
 - [x] ASK_ADVISOR — MVP (snapshot + grounded LLM)
 - [x] ASK_ADVISOR periods — прошлый/named month + MoM deltas in snapshot
-- [x] ASK_ADVISOR trends — monthly_series (3–6) + trend summary
+- [x] ASK_ADVISOR trends — monthly_series (3–12) + trend summary
 - [x] ASK_ADVISOR richer — cashflow + budget_health (overspent / at_risk / pace)
+- [x] ASK_ADVISOR year lookback — «за год» / deficit months in trend
 
 **PR:** `feature/voice-phase-5-hardening`
 
