@@ -1226,6 +1226,69 @@ class AdvisorSnapshotTests(TestCase):
         self.assertEqual(trend['avg_expenses'], 1500.0)
         self.assertEqual(trend['peak_expenses_month'], series[1]['name'])
         self.assertEqual(trend['expenses_direction'], 'up')
+        self.assertEqual(trend['months_with_activity'], 3)
+        self.assertEqual(trend['months_with_deficit'], 3)
+        self.assertEqual(trend['deficit_share_percent'], 100.0)
+
+    def test_year_trend_deficit_stats(self):
+        from asgiref.sync import async_to_sync
+        from datetime import date
+        import calendar
+        from categories.models import Category
+        from transactions.models import Transaction
+        from telegram_bot.services.advisor_snapshot_service import (
+            AdvisorSnapshotService,
+        )
+        from telegram_bot.voice.period_parser import parse_advisor_period
+
+        today = date(2026, 7, 9)
+        salary = Category.objects.create(
+            user=self.user,
+            name='Зарплата',
+            type='income',
+            icon='💰',
+        )
+        # June: surplus (income 5000, expense 2000)
+        Transaction.objects.create(
+            user=self.user,
+            category=salary,
+            amount=self.Decimal('5000'),
+            date=date(2026, 6, 5),
+            description='salary-jun',
+        )
+        Transaction.objects.create(
+            user=self.user,
+            category=self.products,
+            amount=self.Decimal('-2000'),
+            date=date(2026, 6, 10),
+            description='exp-jun',
+        )
+        # May: deficit (expense only)
+        day = min(10, calendar.monthrange(2026, 5)[1])
+        Transaction.objects.create(
+            user=self.user,
+            category=self.products,
+            amount=self.Decimal('-1000'),
+            date=date(2026, 5, day),
+            description='exp-may',
+        )
+
+        period = parse_advisor_period(
+            'посмотри за год, часто ли был минус?',
+            today,
+        )
+        self.assertEqual(period.trend_months, 12)
+        snapshot = async_to_sync(AdvisorSnapshotService(self.user).build)(
+            today=today,
+            period=period,
+        )
+        self.assertEqual(len(snapshot['monthly_series']), 12)
+        trend = snapshot['trend']
+        self.assertEqual(trend['months'], 12)
+        self.assertEqual(trend['months_with_activity'], 3)
+        self.assertEqual(trend['months_with_deficit'], 2)
+        self.assertEqual(trend['months_with_surplus'], 1)
+        self.assertAlmostEqual(trend['deficit_share_percent'], 66.7, places=1)
 
     def test_cashflow_and_budget_health(self):
         from asgiref.sync import async_to_sync
@@ -1397,7 +1460,13 @@ class AdvisorPeriodParserTests(TestCase):
             ('динамика трат за полгода', 6),
             ('тренд расходов за квартал', 3),
             ('как менялись расходы за 3 месяца?', 3),
-            ('за последние 12 месяцев динамика', 6),
+            ('за последние 12 месяцев динамика', 12),
+            ('посмотри за год, насколько я справлялся?', 12),
+            (
+                'А можешь посмотреть вообще за год, насколько я справлялся? '
+                'Часто у меня был минус? Или более-менее нормально?',
+                12,
+            ),
         )
         for phrase, months in cases:
             period = parse_advisor_period(phrase, today)

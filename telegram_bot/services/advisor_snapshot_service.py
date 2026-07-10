@@ -340,9 +340,11 @@ class AdvisorSnapshotService:
     def _summarize_trend(self, series: list[dict[str, Any]]) -> dict[str, Any]:
         expenses = [float(row.get('expenses') or 0) for row in series]
         incomes = [float(row.get('income') or 0) for row in series]
+        balances = [float(row.get('balance') or 0) for row in series]
         n = len(expenses)
         avg_expenses = round(sum(expenses) / n, 2) if n else 0.0
         avg_income = round(sum(incomes) / n, 2) if n else 0.0
+        avg_balance = round(sum(balances) / n, 2) if n else 0.0
         first_exp, last_exp = (expenses[0], expenses[-1]) if n else (0.0, 0.0)
         first_inc, last_inc = (incomes[0], incomes[-1]) if n else (0.0, 0.0)
 
@@ -360,10 +362,24 @@ class AdvisorSnapshotService:
 
         peak_idx = max(range(n), key=lambda i: expenses[i]) if n else 0
         low_idx = min(range(n), key=lambda i: expenses[i]) if n else 0
+        active_months = [
+            row for row in series
+            if float(row.get('income') or 0) or float(row.get('expenses') or 0)
+        ]
+        deficit_months = [
+            row for row in active_months
+            if float(row.get('balance') or 0) < 0
+        ]
+        surplus_months = [
+            row for row in active_months
+            if float(row.get('balance') or 0) > 0
+        ]
+        active_n = len(active_months)
         return {
             'months': n,
             'avg_expenses': avg_expenses,
             'avg_income': avg_income,
+            'avg_balance': avg_balance,
             'expenses_direction': _direction(first_exp, last_exp),
             'income_direction': _direction(first_inc, last_inc),
             'expenses_first_to_last_delta': round(last_exp - first_exp, 2),
@@ -376,6 +392,15 @@ class AdvisorSnapshotService:
             'peak_expenses': expenses[peak_idx] if n else 0.0,
             'lowest_expenses_month': series[low_idx]['name'] if n else None,
             'lowest_expenses': expenses[low_idx] if n else 0.0,
+            'months_with_activity': active_n,
+            'months_with_deficit': len(deficit_months),
+            'months_with_surplus': len(surplus_months),
+            'deficit_share_percent': (
+                round(len(deficit_months) / active_n * 100, 1)
+                if active_n
+                else None
+            ),
+            'deficit_month_names': [row['name'] for row in deficit_months[:6]],
         }
 
     async def _month_budgets(self, year: int, month: int) -> list[dict[str, Any]]:
