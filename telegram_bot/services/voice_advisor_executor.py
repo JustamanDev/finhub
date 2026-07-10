@@ -53,6 +53,15 @@ def _snapshot_has_signal(snapshot: dict[str, Any]) -> bool:
         return True
     if snapshot.get('suggestions'):
         return True
+    health = snapshot.get('budget_health') or {}
+    if health.get('budget_count') or health.get('overspent') or health.get('at_risk'):
+        return True
+    cashflow = snapshot.get('cashflow') or {}
+    if any(
+        float(cashflow.get(key) or 0) != 0
+        for key in ('income', 'expenses', 'balance', 'free_funds')
+    ):
+        return True
     series = snapshot.get('monthly_series') or []
     for row in series:
         if any(float(row.get(key) or 0) != 0 for key in ('income', 'expenses', 'balance')):

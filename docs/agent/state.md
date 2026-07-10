@@ -17,11 +17,12 @@
 
 ## В работе
 
-- [ ] ASK_ADVISOR richer analytics (category trends, budget health, cashflow) — backlog
+- [ ] ASK_ADVISOR extensions (category trends across months, goal ETA) — backlog
 
 ## Недавно завершено
 
-- [x] **ASK_ADVISOR trends** — monthly_series 3–6 мес + trend summary
+- [x] **ASK_ADVISOR richer** — cashflow + budget_health (overspent / at_risk / pace)
+- [x] **ASK_ADVISOR trends** — monthly_series 3–6 мес + trend summary ([PR #42](https://github.com/JustamanDev/finhub/pull/42))
 - [x] **ASK_ADVISOR v2 periods** — прошлый месяц / named month / MoM в snapshot ([PR #41](https://github.com/JustamanDev/finhub/pull/41))
 - [x] **Fix voice budget parse** — category-then-amount + spoken dialog amount ([PR #40](https://github.com/JustamanDev/finhub/pull/40))
 - [x] **ASK_ADVISOR MVP** — grounded LLM по snapshot ([PR #38](https://github.com/JustamanDev/finhub/pull/38))
@@ -48,7 +49,8 @@
 ## Changelog (компактно)
 
 ### 2026-07-10
-- ASK_ADVISOR trends: monthly_series + trend summary for 3–6 months
+- ASK_ADVISOR richer: cashflow + budget_health (overspent / at_risk / pace) in snapshot
+- ASK_ADVISOR trends: monthly_series + trend summary for 3–6 months (PR #42)
 
 ### 2026-07-09
 - ASK_ADVISOR v2 periods: period parser + MoM comparison in snapshot (PR #41)
