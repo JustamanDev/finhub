@@ -1181,6 +1181,52 @@ class AdvisorSnapshotTests(TestCase):
         self.assertIn('comparison_vs_previous', snapshot)
         self.assertIsNone(snapshot['today'])
 
+    def test_trend_monthly_series(self):
+        from asgiref.sync import async_to_sync
+        from datetime import date
+        import calendar
+        from transactions.models import Transaction
+        from telegram_bot.services.advisor_snapshot_service import (
+            AdvisorSnapshotService,
+        )
+        from telegram_bot.voice.period_parser import parse_advisor_period
+
+        today = date(2026, 7, 9)
+        # May / June expenses in addition to July fixture (1500)
+        for year, month, amount in (
+            (2026, 5, '-1000'),
+            (2026, 6, '-2000'),
+        ):
+            day = min(10, calendar.monthrange(year, month)[1])
+            Transaction.objects.create(
+                user=self.user,
+                category=self.products,
+                amount=self.Decimal(amount),
+                date=date(year, month, day),
+                description=f'trend-{month}',
+            )
+
+        period = parse_advisor_period(
+            'как менялись расходы за 3 месяца?',
+            today,
+        )
+        self.assertEqual(period.trend_months, 3)
+        snapshot = async_to_sync(AdvisorSnapshotService(self.user).build)(
+            today=today,
+            period=period,
+        )
+        series = snapshot['monthly_series']
+        self.assertEqual(len(series), 3)
+        self.assertEqual(
+            [(row['year'], row['month'], row['expenses']) for row in series],
+            [(2026, 5, 1000.0), (2026, 6, 2000.0), (2026, 7, 1500.0)],
+        )
+        trend = snapshot['trend']
+        self.assertEqual(trend['months'], 3)
+        self.assertEqual(trend['avg_expenses'], 1500.0)
+        self.assertEqual(trend['peak_expenses_month'], series[1]['name'])
+        self.assertEqual(trend['expenses_direction'], 'up')
+
 
 class AdvisorPeriodParserTests(TestCase):
     def test_current_default(self):
@@ -1258,6 +1304,32 @@ class AdvisorPeriodParserTests(TestCase):
         )
         self.assertTrue(period.wants_comparison)
         self.assertEqual((period.year, period.month), (2026, 6))
+
+    def test_trend_window_phrases(self):
+        from datetime import date
+        from telegram_bot.voice.period_parser import parse_advisor_period
+
+        today = date(2026, 7, 9)
+        cases = (
+            ('как менялись расходы?', 6),
+            ('динамика трат за полгода', 6),
+            ('тренд расходов за квартал', 3),
+            ('как менялись расходы за 3 месяца?', 3),
+            ('за последние 12 месяцев динамика', 6),
+        )
+        for phrase, months in cases:
+            period = parse_advisor_period(phrase, today)
+            self.assertEqual(period.trend_months, months, phrase)
+            self.assertTrue(period.is_current, phrase)
+            self.assertEqual((period.year, period.month), (2026, 7), phrase)
+
+    def test_no_trend_on_plain_month_question(self):
+        from datetime import date
+        from telegram_bot.voice.period_parser import parse_advisor_period
+
+        today = date(2026, 7, 9)
+        period = parse_advisor_period('сколько потратил в прошлом месяце?', today)
+        self.assertIsNone(period.trend_months)
 
 
 class NumberWordsTests(TestCase):
