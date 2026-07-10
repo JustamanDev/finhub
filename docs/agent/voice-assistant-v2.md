@@ -403,7 +403,7 @@ voice_dialog = {
 
 ## 7. Не входит в v2 (non-goals)
 
-- ASK_ADVISOR extensions (category trends across months, goal ETA) — backlog after cashflow/budget_health
+- ASK_ADVISOR extensions (goal ETA) — backlog after category trends
 - Multi-transaction в одной фразе
 - Edit/delete транзакций голосом
 - Local Whisper
