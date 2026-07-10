@@ -46,6 +46,11 @@ MONTH_FULL: dict[str, int] = {
     'декабре': 12,
 }
 
+# Cap multi-month series length for ASK_ADVISOR latency.
+MAX_TREND_MONTHS = 6
+DEFAULT_TREND_MONTHS = 6
+MIN_TREND_MONTHS = 3
+
 
 @dataclass(frozen=True)
 class ParsedPeriod:
@@ -54,6 +59,7 @@ class ParsedPeriod:
     label: str
     is_current: bool = False
     wants_comparison: bool = False
+    trend_months: int | None = None
 
 
 def _shift_month(anchor: date, delta: int) -> date:
@@ -77,16 +83,44 @@ def _month_label(year: int, month: int) -> str:
     return f'{names[month - 1]} {year}'
 
 
+def _clamp_trend_months(value: int) -> int:
+    return max(MIN_TREND_MONTHS, min(MAX_TREND_MONTHS, value))
+
+
+def parse_trend_months(question: str) -> int | None:
+    """Return multi-month window length if the question asks for a trend."""
+    text = (question or '').lower().replace('ё', 'е')
+
+    if re.search(r'за\s+полгода', text):
+        return 6
+    if re.search(r'за\s+квартал', text):
+        return 3
+
+    digit = re.search(
+        r'за\s+(?:последн\w*\s+)?(\d{1,2})\s+месяц',
+        text,
+    )
+    if digit:
+        return _clamp_trend_months(int(digit.group(1)))
+
+    # «как менялись расходы», «динамика», «тренд» — default window
+    if re.search(r'(как\s+менял\w*|динамик\w*|тренд\w*)', text):
+        return DEFAULT_TREND_MONTHS
+
+    return None
+
+
 def parse_advisor_period(question: str, today: date | None = None) -> ParsedPeriod:
     """Extract target calendar month from a Russian advisor question."""
     today = today or date.today()
     text = (question or '').lower().replace('ё', 'е')
+    trend_months = parse_trend_months(text)
     wants_comparison = bool(
         re.search(
             r'(сравн|против|чем\s+в\s+прошл|динамика|тренд|разниц)',
             text,
         ),
-    )
+    ) or trend_months is not None
     month_start = date(today.year, today.month, 1)
 
     # «сравни прошлый месяц с …» — previous is the subject (before позапрошлый)
@@ -97,6 +131,7 @@ def parse_advisor_period(question: str, today: date | None = None) -> ParsedPeri
             month=target.month,
             label=_month_label(target.year, target.month),
             wants_comparison=True,
+            trend_months=trend_months,
         )
 
     if re.search(r'позапрошл\w*\s+месяц', text):
@@ -108,6 +143,7 @@ def parse_advisor_period(question: str, today: date | None = None) -> ParsedPeri
                 month=target.month,
                 label=_month_label(target.year, target.month),
                 wants_comparison=True,
+                trend_months=trend_months,
             )
 
     if re.search(r'(прошл\w*|предыдущ\w*)\s+месяц', text):
@@ -129,6 +165,7 @@ def parse_advisor_period(question: str, today: date | None = None) -> ParsedPeri
                 month=target.month,
                 label=_month_label(target.year, target.month),
                 wants_comparison=wants_comparison,
+                trend_months=trend_months,
             )
 
     # Explicit month name + optional year: «в январе», «за март 2025»
@@ -149,6 +186,7 @@ def parse_advisor_period(question: str, today: date | None = None) -> ParsedPeri
             label=_month_label(year, month),
             is_current=(year == today.year and month == today.month),
             wants_comparison=wants_comparison,
+            trend_months=trend_months,
         )
 
     return ParsedPeriod(
@@ -157,4 +195,5 @@ def parse_advisor_period(question: str, today: date | None = None) -> ParsedPeri
         label=_month_label(today.year, today.month),
         is_current=True,
         wants_comparison=wants_comparison,
+        trend_months=trend_months,
     )

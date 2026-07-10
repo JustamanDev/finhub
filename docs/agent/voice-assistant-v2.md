@@ -19,7 +19,7 @@ Voice → Whisper → [regex | LLM JSON] → VoiceRouter → CommandExecutor →
 | `CREATE_TRANSACTION` | Работает частично |
 | `SET_BUDGET` | ✅ Phase 3 — create/update monthly expense budget |
 | `MANAGE_GOAL` | **Stub** |
-| `ASK_ADVISOR` | ✅ periods — snapshot + MoM + named/previous month |
+| `ASK_ADVISOR` | ✅ trends — monthly_series 3–6 мес + MoM + named/previous month |
 | Уточнения | Только бинарное «✅ Да / ❌ Отмена» при confidence 0.5–0.85 |
 | Диалог | **Нет** — один проход, нет дозаполнения слотов |
 | Категории | Строковый match (`_find_category`), без disambiguation |
@@ -354,6 +354,7 @@ voice_dialog = {
 - [x] Prompt tuning per-user categories (Whisper prompt via `whisper_context.py`)
 - [x] ASK_ADVISOR — MVP (snapshot + grounded LLM)
 - [x] ASK_ADVISOR periods — прошлый/named month + MoM deltas in snapshot
+- [x] ASK_ADVISOR trends — monthly_series (3–6) + trend summary
 
 **PR:** `feature/voice-phase-5-hardening`
 
@@ -399,7 +400,7 @@ voice_dialog = {
 
 ## 7. Не входит в v2 (non-goals)
 
-- ASK_ADVISOR extensions (trends, multi-month charts) — backlog after periods
+- ASK_ADVISOR extensions (category trends, budget health, cashflow) — backlog after multi-month series
 - Multi-transaction в одной фразе
 - Edit/delete транзакций голосом
 - Local Whisper

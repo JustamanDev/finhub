@@ -53,6 +53,10 @@ def _snapshot_has_signal(snapshot: dict[str, Any]) -> bool:
         return True
     if snapshot.get('suggestions'):
         return True
+    series = snapshot.get('monthly_series') or []
+    for row in series:
+        if any(float(row.get(key) or 0) != 0 for key in ('income', 'expenses', 'balance')):
+            return True
     return False
 
 
