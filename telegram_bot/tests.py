@@ -1290,6 +1290,54 @@ class AdvisorSnapshotTests(TestCase):
         self.assertEqual(trend['months_with_surplus'], 1)
         self.assertAlmostEqual(trend['deficit_share_percent'], 66.7, places=1)
 
+    def test_category_trend_series(self):
+        from asgiref.sync import async_to_sync
+        from datetime import date
+        import calendar
+        from transactions.models import Transaction
+        from telegram_bot.services.advisor_snapshot_service import (
+            AdvisorSnapshotService,
+        )
+        from telegram_bot.voice.period_parser import parse_advisor_period
+
+        today = date(2026, 7, 9)
+        for year, month, amount in (
+            (2026, 5, '-800'),
+            (2026, 6, '-1200'),
+        ):
+            day = min(10, calendar.monthrange(year, month)[1])
+            Transaction.objects.create(
+                user=self.user,
+                category=self.products,
+                amount=self.Decimal(amount),
+                date=date(year, month, day),
+                description=f'cat-{month}',
+            )
+
+        period = parse_advisor_period(
+            'как менялись траты на продукты за 3 месяца?',
+            today,
+        )
+        self.assertEqual(period.category_hint, 'продукты')
+        self.assertEqual(period.trend_months, 3)
+        snapshot = async_to_sync(AdvisorSnapshotService(self.user).build)(
+            today=today,
+            period=period,
+        )
+        focus = snapshot['category_focus']
+        self.assertEqual(focus['status'], 'matched')
+        self.assertEqual(focus['name'], 'Продукты')
+        series = snapshot['category_series']
+        self.assertEqual(len(series), 3)
+        self.assertEqual(
+            [row['amount'] for row in series],
+            [800.0, 1200.0, 1500.0],
+        )
+        cat_trend = snapshot['category_trend']
+        self.assertEqual(cat_trend['direction'], 'up')
+        self.assertEqual(cat_trend['avg_amount'], 1166.67)
+        self.assertEqual(cat_trend['months_with_activity'], 3)
+
     def test_cashflow_and_budget_health(self):
         from asgiref.sync import async_to_sync
         from datetime import date
@@ -1481,6 +1529,21 @@ class AdvisorPeriodParserTests(TestCase):
         today = date(2026, 7, 9)
         period = parse_advisor_period('сколько потратил в прошлом месяце?', today)
         self.assertIsNone(period.trend_months)
+
+    def test_category_hint_phrases(self):
+        from datetime import date
+        from telegram_bot.voice.period_parser import parse_advisor_period
+
+        today = date(2026, 7, 9)
+        cases = (
+            ('как менялись траты на продукты?', 'продукты', 6),
+            ('растут ли расходы на такси за 3 месяца?', 'такси', 3),
+            ('динамика по категории транспорт за полгода', 'транспорт', 6),
+        )
+        for phrase, hint, months in cases:
+            period = parse_advisor_period(phrase, today)
+            self.assertEqual(period.category_hint, hint, phrase)
+            self.assertEqual(period.trend_months, months, phrase)
 
 
 class NumberWordsTests(TestCase):

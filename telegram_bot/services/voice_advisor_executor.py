@@ -66,6 +66,13 @@ def _snapshot_has_signal(snapshot: dict[str, Any]) -> bool:
     for row in series:
         if any(float(row.get(key) or 0) != 0 for key in ('income', 'expenses', 'balance')):
             return True
+    cat_series = snapshot.get('category_series') or []
+    for row in cat_series:
+        if float(row.get('amount') or 0) != 0:
+            return True
+    focus = snapshot.get('category_focus') or {}
+    if focus.get('status') in ('matched', 'ambiguous', 'unknown') and focus.get('hint'):
+        return True
     return False
 
 

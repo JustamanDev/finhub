@@ -19,7 +19,7 @@ Voice → Whisper → [regex | LLM JSON] → VoiceRouter → CommandExecutor →
 | `CREATE_TRANSACTION` | Работает частично |
 | `SET_BUDGET` | ✅ Phase 3 — create/update monthly expense budget |
 | `MANAGE_GOAL` | **Stub** |
-| `ASK_ADVISOR` | ✅ richer — cashflow + budget_health + trends + MoM |
+| `ASK_ADVISOR` | ✅ category trends + cashflow + budget_health + MoM |
 | Уточнения | Только бинарное «✅ Да / ❌ Отмена» при confidence 0.5–0.85 |
 | Диалог | **Нет** — один проход, нет дозаполнения слотов |
 | Категории | Строковый match (`_find_category`), без disambiguation |
@@ -357,6 +357,7 @@ voice_dialog = {
 - [x] ASK_ADVISOR trends — monthly_series (3–12) + trend summary
 - [x] ASK_ADVISOR richer — cashflow + budget_health (overspent / at_risk / pace)
 - [x] ASK_ADVISOR year lookback — «за год» / deficit months in trend
+- [x] ASK_ADVISOR category trends — «траты на X» → category_series
 
 **PR:** `feature/voice-phase-5-hardening`
 

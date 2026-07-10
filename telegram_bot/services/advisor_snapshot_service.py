@@ -16,9 +16,14 @@ from budgets.models import Budget
 from telegram_bot.services.goal_service import GoalService
 from telegram_bot.services.report_service import ReportService
 from telegram_bot.services.transaction_service import TransactionService
-from telegram_bot.voice.period_parser import ParsedPeriod, parse_advisor_period
+from telegram_bot.voice.period_parser import (
+    DEFAULT_TREND_MONTHS,
+    ParsedPeriod,
+    parse_advisor_period,
+)
 
 AT_RISK_SPENT_PERCENT = 80.0
+DEFAULT_CATEGORY_MONTHS = DEFAULT_TREND_MONTHS
 
 logger = logging.getLogger(__name__)
 
@@ -128,6 +133,9 @@ class AdvisorSnapshotService:
             ],
             'monthly_series': None,
             'trend': None,
+            'category_focus': None,
+            'category_series': None,
+            'category_trend': None,
         }
 
         if period.trend_months:
@@ -138,6 +146,29 @@ class AdvisorSnapshotService:
             )
             snapshot['monthly_series'] = series
             snapshot['trend'] = self._summarize_trend(series)
+
+        if period.category_hint:
+            focus = await self._resolve_category_focus(period.category_hint)
+            snapshot['category_focus'] = focus
+            if focus.get('status') == 'matched' and focus.get('category_id'):
+                months = period.trend_months or DEFAULT_CATEGORY_MONTHS
+                cat_series = await self._build_category_series(
+                    year,
+                    month,
+                    months,
+                    category_id=int(focus['category_id']),
+                    category_type=str(focus.get('type') or 'expense'),
+                )
+                snapshot['category_series'] = cat_series
+                snapshot['category_trend'] = self._summarize_category_trend(
+                    cat_series,
+                    category_name=str(focus.get('name') or ''),
+                )
+                # Ensure overall series exists when user asked about a category
+                if snapshot['monthly_series'] is None:
+                    series = await self._build_monthly_series(year, month, months)
+                    snapshot['monthly_series'] = series
+                    snapshot['trend'] = self._summarize_trend(series)
 
         if period.is_current:
             today_stats = await TransactionService(self.user).get_today_statistics()
@@ -401,6 +432,127 @@ class AdvisorSnapshotService:
                 else None
             ),
             'deficit_month_names': [row['name'] for row in deficit_months[:6]],
+        }
+
+    async def _resolve_category_focus(self, hint: str) -> dict[str, Any]:
+        from telegram_bot.voice.category_resolver import (
+            CategoryResolver,
+            ResolveStatus,
+        )
+
+        def _resolve() -> dict[str, Any]:
+            resolver = CategoryResolver(self.user)
+            for tx_type in ('expense', 'income'):
+                result = resolver.resolve(hint, tx_type)
+                if result.status == ResolveStatus.MATCHED and result.category:
+                    return {
+                        'status': 'matched',
+                        'hint': hint,
+                        'category_id': result.category.id,
+                        'name': result.category.name,
+                        'type': result.category.type,
+                        'candidates': [],
+                    }
+                if result.status == ResolveStatus.AMBIGUOUS:
+                    return {
+                        'status': 'ambiguous',
+                        'hint': hint,
+                        'category_id': None,
+                        'name': None,
+                        'type': None,
+                        'candidates': [
+                            c.category.name for c in result.candidates[:3]
+                        ],
+                    }
+            return {
+                'status': 'unknown',
+                'hint': hint,
+                'category_id': None,
+                'name': None,
+                'type': None,
+                'candidates': [],
+            }
+
+        return await sync_to_async(_resolve)()
+
+    async def _build_category_series(
+        self,
+        end_year: int,
+        end_month: int,
+        months: int,
+        *,
+        category_id: int,
+        category_type: str,
+    ) -> list[dict[str, Any]]:
+        report_service = ReportService(self.user)
+        points: list[tuple[int, int]] = []
+        year, month = end_year, end_month
+        for _ in range(months):
+            points.append((year, month))
+            year, month = _prev_month(year, month)
+        points.reverse()
+
+        series: list[dict[str, Any]] = []
+        for year, month in points:
+            report = await report_service.get_monthly_report(year, month)
+            amount = 0.0
+            for name, stat in (report.get('categories') or {}).items():
+                cat = stat.get('category')
+                if cat is None or getattr(cat, 'id', None) != category_id:
+                    continue
+                if category_type == 'income':
+                    amount = _money(stat.get('income'))
+                else:
+                    amount = _money(stat.get('expense'))
+                break
+            series.append({
+                'year': year,
+                'month': month,
+                'name': report.get('period_name') or f'{month}.{year}',
+                'amount': amount,
+            })
+        return series
+
+    def _summarize_category_trend(
+        self,
+        series: list[dict[str, Any]],
+        *,
+        category_name: str,
+    ) -> dict[str, Any]:
+        amounts = [float(row.get('amount') or 0) for row in series]
+        n = len(amounts)
+        avg = round(sum(amounts) / n, 2) if n else 0.0
+        first, last = (amounts[0], amounts[-1]) if n else (0.0, 0.0)
+
+        def _direction(a: float, b: float) -> str:
+            if a == 0 and b == 0:
+                return 'flat'
+            if a == 0:
+                return 'up' if b > 0 else 'flat'
+            change = (b - a) / abs(a)
+            if change > 0.05:
+                return 'up'
+            if change < -0.05:
+                return 'down'
+            return 'flat'
+
+        peak_idx = max(range(n), key=lambda i: amounts[i]) if n else 0
+        low_idx = min(range(n), key=lambda i: amounts[i]) if n else 0
+        active = [row for row in series if float(row.get('amount') or 0) > 0]
+        return {
+            'category': category_name,
+            'months': n,
+            'avg_amount': avg,
+            'direction': _direction(first, last),
+            'first_to_last_delta': round(last - first, 2),
+            'first_to_last_percent': (
+                round((last - first) / first * 100, 1) if first else None
+            ),
+            'peak_month': series[peak_idx]['name'] if n else None,
+            'peak_amount': amounts[peak_idx] if n else 0.0,
+            'lowest_month': series[low_idx]['name'] if n else None,
+            'lowest_amount': amounts[low_idx] if n else 0.0,
+            'months_with_activity': len(active),
         }
 
     async def _month_budgets(self, year: int, month: int) -> list[dict[str, Any]]:
