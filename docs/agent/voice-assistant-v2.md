@@ -403,7 +403,7 @@ voice_dialog = {
 
 ## 7. Не входит в v2 (non-goals)
 
-- ASK_ADVISOR extensions (goal ETA) — backlog after category trends
+- Goal ETA shipped: pace of past deposits + deadline plan in snapshot and goal card
 - Multi-transaction в одной фразе
 - Edit/delete транзакций голосом
 - Local Whisper

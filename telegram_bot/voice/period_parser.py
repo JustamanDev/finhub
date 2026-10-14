@@ -61,6 +61,7 @@ class ParsedPeriod:
     wants_comparison: bool = False
     trend_months: int | None = None
     category_hint: str | None = None
+    goal_hint: str | None = None
 
 
 def _shift_month(anchor: date, delta: int) -> date:
@@ -159,12 +160,72 @@ def parse_category_hint(question: str) -> str | None:
     return None
 
 
+_GOAL_HINT_STOP = (
+    r'к|в|за|ли|уже|вообще|этот|этом|месяц\w*|год\w*|дедлайн\w*|дат\w*'
+)
+
+
+def parse_goal_hint(question: str) -> str | None:
+    """Имя цели из вопроса вроде «когда закрою отпуск»."""
+    text = (question or '').lower().replace('ё', 'е')
+    patterns = (
+        r'цел(?:ь|и|ью)\s+([а-яa-z0-9][а-яa-z0-9\s\-]{1,40})',
+        r'(?:закро\w*|накоп\w*)\s+(?:на\s+)?([а-яa-z0-9][а-яa-z0-9\s\-]{1,40})',
+        r'откладыва\w*\s+на\s+([а-яa-z0-9][а-яa-z0-9\s\-]{1,40})',
+    )
+    for pattern in patterns:
+        match = re.search(pattern, text)
+        if not match:
+            continue
+        raw = match.group(1).strip(' .,!?')
+        raw = re.split(rf'\s+(?:{_GOAL_HINT_STOP})\b', raw, maxsplit=1)[0]
+        raw = raw.strip(' .,!?-')
+        if len(raw) < 2:
+            continue
+        if raw in {'цель', 'цели', 'целью', 'дедлайн', 'дедлайну', 'дата', 'дате'}:
+            continue
+        return raw
+    return None
+
+
+_ADVISOR_QUESTION_RE = re.compile(
+    r'(?:'
+    r'сколько\s+(?:я\s+)?(?:потрат\w*|свобод\w*|остал\w*|ушл\w*|накоп\w*|отклад\w*)|'
+    r'когда\s+(?:я\s+)?(?:закро\w*|накоп\w*)|'
+    r'успе\w+\s+ли|'
+    r'успева\w*|'
+    r'хватит\s+ли|'
+    r'как\s+дела\s+с|'
+    r'куда\s+уход\w*|'
+    r'дай\s+совет|'
+    r'как\s+мои\s+цели|'
+    r'как\s+менял\w*|'
+    r'по\s+целям|'
+    r'(?:тренд|динамик\w*|справлял\w*)'
+    r')',
+    re.IGNORECASE,
+)
+
+
+def looks_like_advisor_question(text: str) -> bool:
+    """Вопрос консультанту, а не команда записать сумму."""
+    raw = (text or '').strip()
+    if not raw:
+        return False
+    from telegram_bot.utils.currency_text import parse_leading_amount
+
+    if parse_leading_amount(raw) is not None:
+        return False
+    return _ADVISOR_QUESTION_RE.search(raw.lower().replace('ё', 'е')) is not None
+
+
 def parse_advisor_period(question: str, today: date | None = None) -> ParsedPeriod:
     """Extract target calendar month from a Russian advisor question."""
     today = today or date.today()
     text = (question or '').lower().replace('ё', 'е')
     trend_months = parse_trend_months(text)
     category_hint = parse_category_hint(text)
+    goal_hint = parse_goal_hint(text)
     # Category + growth/decline wording implies a multi-month lookback
     if category_hint and trend_months is None and re.search(
         r'(растут|падают|растёт|растет|падает|менял\w*|динамик\w*|тренд\w*)',
@@ -190,6 +251,7 @@ def parse_advisor_period(question: str, today: date | None = None) -> ParsedPeri
             wants_comparison=True,
             trend_months=trend_months,
             category_hint=category_hint,
+            goal_hint=goal_hint,
         )
 
     if re.search(r'позапрошл\w*\s+месяц', text):
@@ -203,6 +265,7 @@ def parse_advisor_period(question: str, today: date | None = None) -> ParsedPeri
                 wants_comparison=True,
                 trend_months=trend_months,
                 category_hint=category_hint,
+            goal_hint=goal_hint,
             )
 
     if re.search(r'(прошл\w*|предыдущ\w*)\s+месяц', text):
@@ -226,6 +289,7 @@ def parse_advisor_period(question: str, today: date | None = None) -> ParsedPeri
                 wants_comparison=wants_comparison,
                 trend_months=trend_months,
                 category_hint=category_hint,
+            goal_hint=goal_hint,
             )
 
     # Explicit month name + optional year: «в январе», «за март 2025»
@@ -248,6 +312,7 @@ def parse_advisor_period(question: str, today: date | None = None) -> ParsedPeri
             wants_comparison=wants_comparison,
             trend_months=trend_months,
             category_hint=category_hint,
+            goal_hint=goal_hint,
         )
 
     return ParsedPeriod(
@@ -258,4 +323,5 @@ def parse_advisor_period(question: str, today: date | None = None) -> ParsedPeri
         wants_comparison=wants_comparison,
         trend_months=trend_months,
         category_hint=category_hint,
+        goal_hint=goal_hint,
     )

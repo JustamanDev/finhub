@@ -583,6 +583,32 @@ class TextHandler(BaseHandler):
                 if handled:
                     return
 
+            from telegram_bot.voice.period_parser import looks_like_advisor_question
+
+            if looks_like_advisor_question(message_text):
+                await self.log_message(
+                    telegram_user,
+                    'incoming',
+                    message_text,
+                )
+                from telegram_bot.voice.intents import (
+                    ParsedVoiceCommand,
+                    VoiceIntentType,
+                )
+
+                await self._command_executor.execute_ask_advisor(
+                    update,
+                    context,
+                    telegram_user,
+                    ParsedVoiceCommand(
+                        intent=VoiceIntentType.ASK_ADVISOR,
+                        success=True,
+                        confidence=1.0,
+                        raw_transcript=message_text.strip(),
+                    ),
+                )
+                return
+
             # Логируем входящее сообщение
             await self.log_message(
                 telegram_user,
