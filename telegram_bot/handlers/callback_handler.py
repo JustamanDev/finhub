@@ -374,6 +374,15 @@ class CallbackHandler(BaseHandler):
                 await self._handle_report_navigation(query, context, telegram_user)
             elif query.data == "report_disabled":
                 await query.answer("Нет доступных отчетов для навигации")
+            elif query.data in ('entry_currency_RUB', 'entry_currency_VND'):
+                await self._command_executor.apply_entry_currency(
+                    update,
+                    context,
+                    telegram_user,
+                    query.data.rsplit('_', 1)[-1],
+                )
+            elif query.data.startswith('delete_transaction_'):
+                await self._handle_transaction_delete(query, context, telegram_user)
             else:
                 logger.info("Вызываем _handle_unknown_callback")
                 await self._handle_unknown_callback(query, context)
@@ -702,6 +711,7 @@ class CallbackHandler(BaseHandler):
         telegram_user,
     ) -> None:
         """Обрабатывает удаление транзакции"""
+        await query.answer()
         transaction_id = int(query.data.split('_')[2])
         
         user = await sync_to_async(lambda: telegram_user.user)()

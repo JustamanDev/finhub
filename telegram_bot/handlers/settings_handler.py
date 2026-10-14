@@ -433,31 +433,15 @@ class SettingsHandler(BaseHandler):
         telegram_user,
     ) -> None:
         """Валюта ввода и пояснение, что отчёты всегда в рублях."""
-        from transactions.currencies import VND
-
-        currency = getattr(telegram_user, 'default_currency', None) or 'RUB'
-        if currency == VND:
-            current = 'донги (₫)'
-            other = 'рубли'
-        else:
-            current = 'рубли (₽)'
-            other = 'донги'
         message = (
             "⚙️ **Общие настройки**\n\n"
-            f"Валюта ввода по умолчанию: **{current}**.\n\n"
-            "Без пометки сумма считается в этой валюте.\n"
-            "Явно: `50000д кофе` или `1500 руб такси`.\n"
+            "Если в сообщении нет валюты, бот спросит: рубли или донги.\n"
+            "Явно: `50000д кофе` или `1500 руб такси` — без вопроса.\n"
             "Отчёты всегда в рублях. Донги пересчитываются "
             "по курсу ЦБ на день записи."
         )
         
         keyboard = [
-            [
-                InlineKeyboardButton(
-                    text=f"🔁 Переключить на {other}",
-                    callback_data="settings_currency_toggle",
-                ),
-            ],
             [
                 InlineKeyboardButton(
                     text="🔙 Назад",
@@ -479,11 +463,6 @@ class SettingsHandler(BaseHandler):
         context: ContextTypes.DEFAULT_TYPE,
         telegram_user,
     ) -> None:
-        from transactions.currencies import RUB, VND
-
-        current = getattr(telegram_user, 'default_currency', None) or RUB
-        telegram_user.default_currency = VND if current != VND else RUB
-        await telegram_user.asave(update_fields=['default_currency', 'updated_at'])
         await self.handle_general_settings(update, context, telegram_user)
     
     async def handle_limits_settings(

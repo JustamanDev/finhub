@@ -45,11 +45,29 @@ def normalize_currency_token(token: str | None) -> str | None:
     return None
 
 
+def explicit_entry_currency(
+    parsed_command: dict | None,
+    transcript: str | None = None,
+) -> str | None:
+    """
+    Валюта, которую пользователь назвал сам.
+
+    Нет пометки — None: бот должен спросить, а не подставлять валюту молча.
+    """
+    parsed_command = parsed_command or {}
+    explicit = parsed_command.get('currency')
+    if explicit in {RUB, VND}:
+        return explicit
+    return detect_currency_mention(
+        transcript or parsed_command.get('raw_text') or '',
+    )
+
+
 def detect_currency_mention(text: str | None) -> str | None:
     """
     Валюта, явно названная во фразе.
 
-    Если названы обе или ни одной — None, пусть решает валюта по умолчанию.
+    Если названы обе или ни одной — None.
     """
     if not text:
         return None

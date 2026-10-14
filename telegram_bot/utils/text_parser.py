@@ -58,11 +58,16 @@ class TextCommandParser:
             # 1. Проверяем алиасы (п500, к200)
             if match := re.match(self.ALIAS_PATTERN, text.lower()):
                 return self._parse_alias(match.group(1))
-                
-            # 2. Сумма, необязательная валюта, необязательная категория
+
+            from telegram_bot.voice.number_words import replace_spoken_numbers
+
+            text = replace_spoken_numbers(text)
+
+            # 2. Сумма, необязательная валюта, необязательная категория.
+            # Без явной пометки currency остаётся None — бот спросит валюту.
             leading = parse_leading_amount(text)
             if leading is not None:
-                currency = leading['currency'] or self._default_currency()
+                currency = leading['currency']
                 if leading['rest']:
                     return self._parse_amount_category(
                         leading['amount'],
@@ -79,14 +84,10 @@ class TextCommandParser:
                 amount_str, currency_token, category_name = match.groups()
                 from telegram_bot.utils.currency_text import normalize_currency_token
 
-                currency = (
-                    normalize_currency_token(currency_token)
-                    or self._default_currency()
-                )
                 return self._parse_amount_category(
                     amount_str,
                     category_name.strip(),
-                    currency=currency,
+                    currency=normalize_currency_token(currency_token),
                 )
                 
             # 4. Только категория (кофе, продукты)
@@ -143,19 +144,11 @@ class TextCommandParser:
                 'error': f'Алиас "{alias}" не найден',
             }
     
-    def _default_currency(self) -> str:
-        """Валюта пользователя, если в тексте нет явной пометки."""
-        try:
-            telegram_user = self.user.telegramuser
-        except Exception:
-            return RUB
-        return getattr(telegram_user, 'default_currency', None) or RUB
-
     def _parse_amount_category(
         self,
         amount_str: str,
         category_name: str,
-        currency: str = RUB,
+        currency: str | None = None,
     ) -> Dict[str, Any]:
         """
         Парсинг: 500 кофе, +1000 зарплата
@@ -210,7 +203,7 @@ class TextCommandParser:
     def _parse_amount_only(
         self,
         amount_str: str,
-        currency: str = RUB,
+        currency: str | None = None,
     ) -> Dict[str, Any]:
         """
         Парсинг: 500, +1000

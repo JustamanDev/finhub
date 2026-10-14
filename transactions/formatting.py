@@ -12,7 +12,9 @@ def format_entry_amount(amount, currency: str | None) -> str:
     value = Decimal(amount)
     if currency == VND:
         return f'{value:,.0f}₫'
-    return f'{value:,.0f}₽'
+    if currency == RUB:
+        return f'{value:,.0f}₽'
+    return f'{value:,.0f}'
 
 
 def format_transaction_amount(transaction) -> str:

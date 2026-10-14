@@ -660,6 +660,16 @@ class TextHandler(BaseHandler):
             if parsed.get('success'):
                 break
         if parsed.get('success') and parsed.get('type') == 'amount_only':
+            if not parsed.get('currency'):
+                await self._command_executor.execute_create_transaction(
+                    update,
+                    context,
+                    telegram_user,
+                    parsed,
+                    voice_transcript=message_text,
+                )
+                return
+
             from telegram_bot.utils.currency_text import stash_entry_currency
 
             user_state.current_amount = parsed['amount']
