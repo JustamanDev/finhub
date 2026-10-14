@@ -190,6 +190,12 @@ class ReportHandler(BaseHandler):
             # Безопасно получаем тип категории
             category_type = getattr(category, 'type', 'expense')
             
+            if (
+                not getattr(category, 'is_active', True)
+                and stats['income'] == 0
+                and stats['expense'] == 0
+            ):
+                continue
             if category_type == 'income':
                 income_categories.append((category_name, stats))
             else:

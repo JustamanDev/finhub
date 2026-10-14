@@ -496,6 +496,7 @@ def _budget_rows(user, start: date, end: date) -> tuple[BudgetRow, ...]:
         Budget.objects.filter(
             user=user,
             is_active=True,
+            category__is_active=True,
             start_date__lte=end,
             end_date__gte=start,
         )

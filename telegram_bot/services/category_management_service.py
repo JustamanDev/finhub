@@ -3,6 +3,7 @@ from typing import List, Optional, Dict
 from django.contrib.auth.models import User
 from asgiref.sync import sync_to_async
 
+from budgets.models import Budget
 from categories.models import Category
 from transactions.models import Transaction
 
@@ -16,9 +17,21 @@ class CategoryManagementService:
         self.user = user
     
     async def get_user_categories(self) -> List[Category]:
-        """Получает все категории пользователя"""
+        """Активные категории: их видно в меню и быстром вводе."""
         return await sync_to_async(list)(
-            Category.objects.filter(user=self.user).order_by('type', 'name')
+            Category.objects.filter(
+                user=self.user,
+                is_active=True,
+            ).order_by('type', 'name')
+        )
+
+    async def get_archived_categories(self) -> List[Category]:
+        """Категории, скрытые из меню. Операции по ним остаются."""
+        return await sync_to_async(list)(
+            Category.objects.filter(
+                user=self.user,
+                is_active=False,
+            ).order_by('type', 'name')
         )
     
     async def get_category_by_id(self, category_id: int) -> Optional[Category]:
@@ -41,7 +54,22 @@ class CategoryManagementService:
         category_type: str,
         icon: str = "💰",
     ) -> Category:
-        """Создает новую категорию"""
+        """Создает новую категорию.
+
+        Если такое имя уже лежит в архиве, категория возвращается в меню:
+        уникальность имени не даёт завести вторую, а история должна остаться одной.
+        """
+        archived = await sync_to_async(
+            lambda: Category.objects.filter(
+                user=self.user,
+                name=name,
+                type=category_type,
+                is_active=False,
+            ).first(),
+        )()
+        if archived is not None:
+            return await self.restore_category(archived.id, icon=icon)
+
         category = await sync_to_async(Category.objects.create)(
             user=self.user,
             name=name,
@@ -98,35 +126,66 @@ class CategoryManagementService:
             logger.warning(f"Категория {category_id} не найдена")
             return None
     
-    async def delete_category(self, category_id: int) -> bool:
-        """Удаляет категорию"""
+    async def archive_category(self, category_id: int) -> Optional[Category]:
+        """Прячет категорию из меню. Транзакции и прошлые суммы не трогает."""
         try:
             category = await Category.objects.aget(
                 id=category_id,
                 user=self.user,
             )
-            
-            # Проверяем, есть ли транзакции в этой категории
-            transaction_count = await sync_to_async(
-                Transaction.objects.filter(category=category).count
-            )()
-            
-            if transaction_count > 0:
-                logger.warning(
-                    f"Нельзя удалить категорию {category_id}: "
-                    f"есть {transaction_count} транзакций"
-                )
-                return False
-            
-            # Удаляем категорию
-            await sync_to_async(category.delete)()
-            
-            logger.info(f"Удалена категория: {category.name}")
-            return True
-            
         except Category.DoesNotExist:
             logger.warning(f"Категория {category_id} не найдена")
-            return False
+            return None
+
+        category.is_active = False
+        await sync_to_async(category.save)(update_fields=['is_active', 'updated_at'])
+        await self._set_open_budgets_active(category, active=False)
+        logger.info(f"Категория в архиве: {category.name}")
+        return category
+
+    async def restore_category(
+        self,
+        category_id: int,
+        icon: Optional[str] = None,
+    ) -> Optional[Category]:
+        """Возвращает категорию в меню и снова включает её текущий лимит."""
+        try:
+            category = await Category.objects.aget(
+                id=category_id,
+                user=self.user,
+            )
+        except Category.DoesNotExist:
+            logger.warning(f"Категория {category_id} не найдена")
+            return None
+
+        category.is_active = True
+        update_fields = ['is_active', 'updated_at']
+        if icon:
+            category.icon = icon
+            update_fields.append('icon')
+        await sync_to_async(category.save)(update_fields=update_fields)
+        await self._set_open_budgets_active(category, active=True)
+        logger.info(f"Категория возвращена из архива: {category.name}")
+        return category
+
+    async def delete_category(self, category_id: int) -> bool:
+        """Совместимое имя: категория уходит в архив, а не удаляется из базы."""
+        return await self.archive_category(category_id) is not None
+
+    async def _set_open_budgets_active(self, category: Category, *, active: bool) -> None:
+        """Текущие и будущие лимиты категории. Прошлые периоды не переписываем."""
+        from django.utils import timezone
+
+        today = timezone.localdate()
+
+        def _update() -> None:
+            Budget.objects.filter(
+                user=self.user,
+                category=category,
+                end_date__gte=today,
+            ).update(is_active=active)
+
+        await sync_to_async(_update)()
     
     async def get_category_stats(self, category_id: int) -> Optional[Dict]:
         """Получает статистику по категории"""

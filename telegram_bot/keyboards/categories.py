@@ -99,6 +99,7 @@ class CategoryKeyboard:
             Category.objects.filter(
                 user=self.user,
                 type=transaction_type,
+                is_active=True,
             ).order_by('name')
         )
         

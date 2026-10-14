@@ -832,6 +832,7 @@ class VoiceDialogManager:
                 command.category = await Category.objects.aget(
                     id=category_id,
                     user=user,
+                    is_active=True,
                 )
                 command.category_name = command.category.name
                 command.transaction_type = command.category.type

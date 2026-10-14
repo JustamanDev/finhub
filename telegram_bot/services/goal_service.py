@@ -335,6 +335,7 @@ class GoalService:
             Budget.objects.filter(
                 user=self.user,
                 is_active=True,
+                category__is_active=True,
                 period_type=Budget.MONTHLY,
                 start_date__in=months_list,
             ).select_related('category')
