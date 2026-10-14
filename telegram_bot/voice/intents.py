@@ -35,6 +35,7 @@ class ParsedVoiceCommand:
     raw_transcript: str
     transaction_type: str | None = None
     amount: Decimal | None = None
+    currency: str | None = None
     category_name: str | None = None
     category: Category | None = None
     description: str = ''
@@ -94,6 +95,7 @@ class ParsedVoiceCommand:
             return {
                 'type': 'amount_only',
                 'amount': self.amount,
+                'currency': self.currency,
                 'transaction_type': self.transaction_type,
                 'description': self.description,
                 'success': True,
@@ -101,6 +103,7 @@ class ParsedVoiceCommand:
         return {
             'type': 'amount_category',
             'amount': self.amount,
+            'currency': self.currency,
             'category_name': self.category_name,
             'transaction_type': self.transaction_type,
             'category': self.category,

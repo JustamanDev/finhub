@@ -1,7 +1,11 @@
+from decimal import Decimal
+
 from rest_framework import serializers
 from .models import Transaction
 from categories.models import Category
 from categories.serializers import CategorySerializer
+from transactions.currencies import RUB
+from transactions.exchange import ExchangeRateUnavailable, apply_entered_amount
 
 
 class TransactionSerializer(serializers.ModelSerializer):
@@ -16,6 +20,10 @@ class TransactionSerializer(serializers.ModelSerializer):
         fields = [
             'id',
             'amount',
+            'currency',
+            'original_amount',
+            'exchange_rate',
+            'rate_date',
             'description',
             'category',
             'category_name',
@@ -28,13 +36,31 @@ class TransactionSerializer(serializers.ModelSerializer):
             'updated_at',
         ]
         read_only_fields = [
+            'currency',
+            'original_amount',
+            'exchange_rate',
+            'rate_date',
             'created_at',
             'updated_at',
         ]
         
     def create(self, validated_data):
         validated_data['user'] = self.context['request'].user
-        return super().create(validated_data)
+        currency = validated_data.pop('currency', RUB)
+        entered = validated_data.pop('amount')
+        transaction = Transaction(amount=entered, **validated_data)
+        try:
+            apply_entered_amount(transaction, entered, currency)
+        except ExchangeRateUnavailable as exc:
+            raise serializers.ValidationError({'amount': str(exc)}) from exc
+        transaction.save()
+        return transaction
+
+    def update(self, instance, validated_data):
+        if 'amount' in validated_data and instance.currency == RUB:
+            validated_data['original_amount'] = validated_data['amount']
+            validated_data['exchange_rate'] = Decimal('1')
+        return super().update(instance, validated_data)
         
     def validate_category(self, value):
         """Проверка что категория принадлежит текущему пользователю"""
@@ -52,11 +78,35 @@ class TransactionCreateSerializer(serializers.ModelSerializer):
         model = Transaction
         fields = [
             'amount',
+            'currency',
+            'original_amount',
+            'exchange_rate',
+            'rate_date',
             'description',
             'category',
             'date',
         ]
-        
+        read_only_fields = [
+            'original_amount',
+            'exchange_rate',
+            'rate_date',
+        ]
+        extra_kwargs = {
+            'currency': {
+                'required': False,
+                'default': RUB,
+                'help_text': 'Валюта поля amount при создании. В ответе amount уже в рублях.',
+            },
+        }
+
     def create(self, validated_data):
         validated_data['user'] = self.context['request'].user
-        return super().create(validated_data) 
+        currency = validated_data.pop('currency', RUB)
+        entered = validated_data.pop('amount')
+        transaction = Transaction(amount=entered, **validated_data)
+        try:
+            apply_entered_amount(transaction, entered, currency)
+        except ExchangeRateUnavailable as exc:
+            raise serializers.ValidationError({'amount': str(exc)}) from exc
+        transaction.save()
+        return transaction 

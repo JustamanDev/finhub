@@ -12,6 +12,12 @@ from telegram.ext import ContextTypes
 from telegram_bot.keyboards.actions import ActionKeyboard
 from telegram_bot.keyboards.categories import CategoryKeyboard
 from telegram_bot.services.transaction_service import TransactionService
+from telegram_bot.utils.currency_text import (
+    detect_currency_mention,
+    stash_entry_currency,
+)
+from transactions.currencies import RUB, VND
+from transactions.formatting import format_entry_amount, format_transaction_amount
 from telegram_bot.services.voice_budget_executor import (
     find_current_month_budget_async,
     upsert_monthly_budget_async,
@@ -91,6 +97,38 @@ class CommandExecutor:
             voice_transcript=command.raw_transcript,
         )
 
+    async def _resolve_currency(
+        self,
+        telegram_user,
+        parsed_command: dict[str, Any],
+        voice_transcript: str | None,
+    ) -> str:
+        explicit = parsed_command.get('currency')
+        if explicit in {RUB, VND}:
+            return explicit
+        detected = detect_currency_mention(
+            voice_transcript or parsed_command.get('raw_text') or '',
+        )
+        if detected:
+            return detected
+
+        def _default() -> str:
+            return getattr(telegram_user, 'default_currency', None) or RUB
+
+        return await sync_to_async(_default, thread_sensitive=True)()
+
+    async def _store_vnd_amount_as_rub(self, command: ParsedVoiceCommand) -> None:
+        """Лимиты и цели хранятся в рублях. Донги пересчитываем перед записью."""
+        if command.currency != VND or command.amount is None:
+            return
+        from transactions.exchange import convert_magnitude_to_rub
+
+        command.amount = await sync_to_async(
+            convert_magnitude_to_rub,
+            thread_sensitive=True,
+        )(command.amount)
+        command.currency = RUB
+
     async def execute_set_budget(
         self,
         update: Update,
@@ -101,6 +139,8 @@ class CommandExecutor:
         skip_update_confirm: bool = False,
     ) -> None:
         """Create or update monthly expense budget from a voice command."""
+        await self._store_vnd_amount_as_rub(command)
+
         if command.amount is None or command.category is None:
             await self.send_error(
                 update,
@@ -270,6 +310,8 @@ class CommandExecutor:
             execute_goal_deposit,
             execute_goal_withdraw,
         )
+
+        await self._store_vnd_amount_as_rub(command)
 
         action = command.goal_action
         if action not in {
@@ -610,7 +652,11 @@ class CommandExecutor:
         lines = [
             f'🎤 Распознано: «{command.raw_transcript}»',
             '',
-            f'Записать {tx_type} {command.amount:,.0f}₽ → {category_label}?',
+            (
+                f'Записать {tx_type} '
+                f'{format_entry_amount(command.amount, command.currency)} '
+                f'→ {category_label}?'
+            ),
         ]
         keyboard = InlineKeyboardMarkup([
             [
@@ -666,6 +712,7 @@ class CommandExecutor:
         user_state.current_amount = command.amount
         user_state.awaiting_category = True
         user_state.last_transaction_type = transaction_type
+        stash_entry_currency(user_state, command.currency or RUB)
         await user_state.asave()
 
         is_budget = command.intent == VoiceIntentType.SET_BUDGET
@@ -674,9 +721,7 @@ class CommandExecutor:
             f'🎤 Распознано: «{command.raw_transcript}»',
             '',
         ]
-        amount_label = (
-            f'{command.amount:,.0f}₽' if command.amount is not None else '—'
-        )
+        amount_label = format_entry_amount(command.amount, command.currency)
         if resolved.status == ResolveStatus.AMBIGUOUS:
             if is_budget:
                 lines.append(
@@ -840,6 +885,7 @@ class CommandExecutor:
             'voice_create_after': True,
             'voice_intent': command.intent.value,
             'suggested_name': suggested,
+            'entry_currency': command.currency or RUB,
         }
         await user_state.asave()
 
@@ -850,9 +896,9 @@ class CommandExecutor:
             else 'Отправьте название новой категории (можно с эмодзи).'
         )
         purpose = (
-            f'лимита {command.amount:,.0f}₽'
+            f'лимита {format_entry_amount(command.amount, command.currency)}'
             if command.intent == VoiceIntentType.SET_BUDGET
-            else f'{command.amount:,.0f}₽'
+            else format_entry_amount(command.amount, command.currency)
         )
         await context.bot.send_message(
             chat_id=update.effective_chat.id,
@@ -873,6 +919,11 @@ class CommandExecutor:
     ) -> None:
         user = await sync_to_async(lambda: telegram_user.user)()
         transaction_service = TransactionService(user)
+        currency = await self._resolve_currency(
+            telegram_user,
+            parsed_command,
+            voice_transcript,
+        )
 
         if parsed_command.get('category'):
             try:
@@ -881,6 +932,7 @@ class CommandExecutor:
                     category=parsed_command['category'],
                     transaction_type=parsed_command['transaction_type'],
                     description=parsed_command.get('description') or '',
+                    currency=currency,
                 )
                 from telegram_bot.handlers.base import BaseHandler
 
@@ -906,6 +958,15 @@ class CommandExecutor:
         else:
             # Text path / confirm path: fall back to full keyboard.
             # Voice unresolved names go through prompt_category_resolution in router.
+            from telegram_bot.handlers.base import BaseHandler
+
+            base = BaseHandler()
+            user_state = await base.get_user_state(telegram_user)
+            user_state.current_amount = parsed_command['amount']
+            user_state.awaiting_category = True
+            user_state.last_transaction_type = parsed_command['transaction_type']
+            stash_entry_currency(user_state, currency)
+            await user_state.asave()
             await self.send_category_selection(
                 update,
                 context,
@@ -916,6 +977,7 @@ class CommandExecutor:
                     f"Категория '{parsed_command['category_name']}' не найдена."
                 ),
                 voice_transcript=voice_transcript,
+                currency=currency,
             )
 
     async def _handle_amount_only(
@@ -936,9 +998,15 @@ class CommandExecutor:
             or user_state.last_transaction_type
             or 'expense'
         )
+        currency = await self._resolve_currency(
+            telegram_user,
+            parsed_command,
+            voice_transcript,
+        )
         user_state.current_amount = parsed_command['amount']
         user_state.awaiting_category = True
         user_state.last_transaction_type = transaction_type
+        stash_entry_currency(user_state, currency)
         await user_state.asave()
 
         await self.send_category_selection(
@@ -948,6 +1016,7 @@ class CommandExecutor:
             parsed_command['amount'],
             transaction_type,
             voice_transcript=voice_transcript,
+            currency=currency,
         )
 
     async def send_category_selection(
@@ -960,6 +1029,7 @@ class CommandExecutor:
         prefix_message: str = '',
         *,
         voice_transcript: str | None = None,
+        currency: str = RUB,
     ) -> None:
         keyboard_generator = CategoryKeyboard(telegram_user)
         keyboard = await keyboard_generator.get_frequent_categories_keyboard(
@@ -975,7 +1045,8 @@ class CommandExecutor:
         if prefix_message:
             parts.append(prefix_message)
         parts.append(
-            f'{transaction_emoji} {amount:,.0f}₽ - выбери категорию ({type_name}):',
+            f'{transaction_emoji} {format_entry_amount(amount, currency)}'
+            f' - выбери категорию ({type_name}):',
         )
 
         await context.bot.send_message(
@@ -998,10 +1069,12 @@ class CommandExecutor:
         lines = []
         if voice_transcript:
             lines.append(f'🎤 Распознано: «{voice_transcript}»')
+        money_lines = format_transaction_amount(transaction).splitlines()
         lines.append(
-            f'✅ {abs(transaction.amount):,.0f}₽ → '
+            f'✅ {money_lines[0]} → '
             f'{transaction.category.icon} {transaction.category.name}',
         )
+        lines.extend(money_lines[1:])
         lines.append(f'Добавлено {transaction.date.strftime("%d.%m.%Y")}')
 
         keyboard = ActionKeyboard.get_transaction_actions_keyboard(transaction.id)

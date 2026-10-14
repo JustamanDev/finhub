@@ -1,6 +1,7 @@
 from django.db import models
 from django.contrib.auth.models import User
 from core.models import TimestampedModel
+from transactions.currencies import CURRENCY_CHOICES, RUB
 
 
 class TelegramUser(TimestampedModel):
@@ -24,6 +25,13 @@ class TelegramUser(TimestampedModel):
     language_code = models.CharField(
         max_length=10,
         default='ru',
+    )
+    default_currency = models.CharField(
+        'Валюта ввода',
+        max_length=3,
+        choices=CURRENCY_CHOICES,
+        default=RUB,
+        help_text='Если в сообщении нет пометки «руб» или «донг».',
     )
     is_active = models.BooleanField(default=True)
 

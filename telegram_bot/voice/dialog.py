@@ -183,6 +183,12 @@ def next_step(missing: list[str]) -> str | None:
     return None
 
 
+def _amount_label(amount, slots: dict[str, Any]) -> str:
+    from transactions.formatting import format_entry_amount
+
+    return format_entry_amount(amount, slots.get('currency'))
+
+
 def prompt_for_step(step: str, slots: dict[str, Any], *, intent: str = '') -> str:
     amount = slots.get('amount')
     cat = slots.get('category_name') or slots.get('category_label')
@@ -218,17 +224,23 @@ def prompt_for_step(step: str, slots: dict[str, Any], *, intent: str = '') -> st
     if step == STEP_CATEGORY:
         if is_budget:
             if amount is not None:
-                return f'На какую категорию установить лимит {amount:,.0f}₽?'
+                return (
+                    'На какую категорию установить лимит '
+                    f'{_amount_label(amount, slots)}?'
+                )
             return 'На какую категорию установить лимит?'
         if amount is not None:
-            return f'На какую категорию записать {amount:,.0f}₽?'
+            return (
+                'На какую категорию записать '
+                f'{_amount_label(amount, slots)}?'
+            )
         return 'На какую категорию записать?'
     if step == STEP_GOAL:
         if goal_action == GOAL_ACTION_CREATE:
             return 'Как назвать новую цель?'
         if amount is not None:
             verb = 'снять' if goal_action == GOAL_ACTION_WITHDRAW else 'пополнить'
-            return f'Какую цель {verb} на {amount:,.0f}₽?'
+            return f'Какую цель {verb} на {_amount_label(amount, slots)}?'
         return 'Какую цель имеете в виду?'
     return 'Уточните, пожалуйста.'
 
@@ -239,6 +251,8 @@ def command_to_slots(command: ParsedVoiceCommand) -> dict[str, Any]:
     }
     if command.amount is not None:
         slots['amount'] = command.amount
+    if command.currency:
+        slots['currency'] = command.currency
     if command.transaction_type:
         slots['transaction_type'] = command.transaction_type
     if command.category_name:
@@ -294,6 +308,7 @@ def slots_to_command(slots: dict[str, Any], transcript: str) -> ParsedVoiceComma
         raw_transcript=transcript or slots.get('raw_transcript') or '',
         transaction_type=tx_type,
         amount=amount,
+        currency=slots.get('currency'),
         category_name=category_name,
         category=category,
         description=slots.get('description') or '',
@@ -321,7 +336,7 @@ def _parse_amount(text: str) -> Decimal | None:
     ).strip()
     # Drop currency words for digit parse
     digitish = re.sub(
-        r'(?i)\s*руб(?:лей|ля|ль)?\.?\s*$',
+        r'(?i)(?:\s*(?:руб(?:лей|ля|ль)?|vnd|dong|донг(?:ов|а|и)?|₽|₫|đ)\.?|(?<=\d)[рд])\s*$',
         '',
         raw,
     ).strip()
@@ -338,7 +353,7 @@ def _parse_amount(text: str) -> Decimal | None:
 
     expanded = replace_spoken_numbers(digitish)
     expanded_clean = re.sub(
-        r'(?i)\s*руб(?:лей|ля|ль)?\.?\s*$',
+        r'(?i)(?:\s*(?:руб(?:лей|ля|ль)?|vnd|dong|донг(?:ов|а|и)?|₽|₫|đ)\.?|(?<=\d)[рд])\s*$',
         '',
         expanded,
     ).strip().replace(' ', '').replace(',', '.')
@@ -638,9 +653,14 @@ class VoiceDialogManager:
 
         # Prefer filling the current step, but also accept richer phrases.
         if dialog.step == STEP_AMOUNT:
+            from telegram_bot.utils.currency_text import detect_currency_mention
+
             amount = _parse_amount(text)
             if amount is not None:
                 dialog.slots['amount'] = amount
+                detected = detect_currency_mention(text)
+                if detected:
+                    dialog.slots['currency'] = detected
                 return
             # Try full parse candidates
             for candidate in voice_text_parse_candidates(text):
@@ -649,6 +669,8 @@ class VoiceDialogManager:
                 )
                 if parsed.amount is not None:
                     dialog.slots['amount'] = parsed.amount
+                    if parsed.currency:
+                        dialog.slots['currency'] = parsed.currency
                     if parsed.transaction_type:
                         dialog.slots['transaction_type'] = parsed.transaction_type
                     if parsed.category_name:
@@ -690,6 +712,8 @@ class VoiceDialogManager:
                     )
                     if parsed.amount is not None:
                         dialog.slots['amount'] = parsed.amount
+                    if parsed.currency:
+                        dialog.slots['currency'] = parsed.currency
                     return
                 if parsed.category_name:
                     dialog.slots['category_name'] = parsed.category_name
@@ -733,6 +757,8 @@ class VoiceDialogManager:
                     dialog.slots['goal_label'] = parsed.goal.title
                     if parsed.amount is not None:
                         dialog.slots['amount'] = parsed.amount
+                    if parsed.currency:
+                        dialog.slots['currency'] = parsed.currency
                     if parsed.goal_action:
                         dialog.slots['goal_action'] = parsed.goal_action
                     return

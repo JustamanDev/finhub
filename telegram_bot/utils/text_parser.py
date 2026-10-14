@@ -10,20 +10,23 @@ from typing import (
 )
 
 from categories.models import Category
+from telegram_bot.utils.currency_text import (
+    CURRENCY_WORD,
+    parse_leading_amount,
+)
+from transactions.currencies import RUB
 
 
 class TextCommandParser:
     """Парсер команд вида '500 кофе', '+1000 зарплата', 'п500'"""
     
     # Регулярки для разных форматов
-    AMOUNT_CATEGORY_PATTERN = r'^([+-]?\d+(?:[.,]\d+)?)\s+(.+)$'
-    AMOUNT_ONLY_PATTERN = r'^([+-]?\d+(?:[.,]\d+)?)$'
     ALIAS_PATTERN = r'^([а-я]\d+)$'
     CATEGORY_ONLY_PATTERN = r'^([а-яё\s]+)$'
     NATURAL_VOICE_PATTERN = (
         r'(?i)^(?:добавь|запиши|создай|потрать|расход)\s+'
         r'(\d+(?:[.,]\d+)?)\s*'
-        r'(?:руб(?:лей|ля|ль)?\.?\s*)?'
+        rf'({CURRENCY_WORD}\.?\s*)?'
         r'(?:в\s+)?(?:категори(?:ю|и)\s+)?(.+?)[.\s]*$'
     )
     
@@ -56,26 +59,35 @@ class TextCommandParser:
             if match := re.match(self.ALIAS_PATTERN, text.lower()):
                 return self._parse_alias(match.group(1))
                 
-            # 2. Сумма + категория (500 кофе, +1000 зарплата)
-            if match := re.match(self.AMOUNT_CATEGORY_PATTERN, text):
-                amount_str, category_name = match.groups()
-                return self._parse_amount_category(
-                    amount_str,
-                    category_name,
+            # 2. Сумма, необязательная валюта, необязательная категория
+            leading = parse_leading_amount(text)
+            if leading is not None:
+                currency = leading['currency'] or self._default_currency()
+                if leading['rest']:
+                    return self._parse_amount_category(
+                        leading['amount'],
+                        leading['rest'],
+                        currency=currency,
+                    )
+                return self._parse_amount_only(
+                    leading['amount'],
+                    currency=currency,
                 )
 
             # 2b. Голосовые фразы: «добавь 500 рублей в категорию мобильный»
             if match := re.match(self.NATURAL_VOICE_PATTERN, text):
-                amount_str, category_name = match.groups()
+                amount_str, currency_token, category_name = match.groups()
+                from telegram_bot.utils.currency_text import normalize_currency_token
+
+                currency = (
+                    normalize_currency_token(currency_token)
+                    or self._default_currency()
+                )
                 return self._parse_amount_category(
                     amount_str,
                     category_name.strip(),
+                    currency=currency,
                 )
-                
-            # 3. Только сумма (500, +1000)
-            if match := re.match(self.AMOUNT_ONLY_PATTERN, text):
-                amount_str = match.group(1)
-                return self._parse_amount_only(amount_str)
                 
             # 4. Только категория (кофе, продукты)
             if re.match(self.CATEGORY_ONLY_PATTERN, text.lower()):
@@ -118,6 +130,7 @@ class TextCommandParser:
                 'type': 'alias',
                 'alias': alias,
                 'amount': user_alias.amount,
+                'currency': RUB,
                 'category': user_alias.category,
                 'transaction_type': user_alias.category.type,
                 'success': True,
@@ -130,10 +143,19 @@ class TextCommandParser:
                 'error': f'Алиас "{alias}" не найден',
             }
     
+    def _default_currency(self) -> str:
+        """Валюта пользователя, если в тексте нет явной пометки."""
+        try:
+            telegram_user = self.user.telegramuser
+        except Exception:
+            return RUB
+        return getattr(telegram_user, 'default_currency', None) or RUB
+
     def _parse_amount_category(
         self,
         amount_str: str,
         category_name: str,
+        currency: str = RUB,
     ) -> Dict[str, Any]:
         """
         Парсинг: 500 кофе, +1000 зарплата
@@ -172,6 +194,7 @@ class TextCommandParser:
             return {
                 'type': 'amount_category',
                 'amount': amount,
+                'currency': currency,
                 'category_name': category_name,
                 'transaction_type': transaction_type,
                 'category': category,
@@ -184,7 +207,11 @@ class TextCommandParser:
                 'error': f'Неверная сумма: "{amount_str}"',
             }
     
-    def _parse_amount_only(self, amount_str: str) -> Dict[str, Any]:
+    def _parse_amount_only(
+        self,
+        amount_str: str,
+        currency: str = RUB,
+    ) -> Dict[str, Any]:
         """
         Парсинг: 500, +1000
         
@@ -203,6 +230,7 @@ class TextCommandParser:
             return {
                 'type': 'amount_only',
                 'amount': amount,
+                'currency': currency,
                 'transaction_type': transaction_type,
                 'success': True,
             }

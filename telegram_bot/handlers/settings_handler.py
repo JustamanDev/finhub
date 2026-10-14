@@ -432,18 +432,32 @@ class SettingsHandler(BaseHandler):
         context: ContextTypes.DEFAULT_TYPE,
         telegram_user,
     ) -> None:
-        """Показывает общие настройки"""
+        """Валюта ввода и пояснение, что отчёты всегда в рублях."""
+        from transactions.currencies import VND
+
+        currency = getattr(telegram_user, 'default_currency', None) or 'RUB'
+        if currency == VND:
+            current = 'донги (₫)'
+            other = 'рубли'
+        else:
+            current = 'рубли (₽)'
+            other = 'донги'
         message = (
             "⚙️ **Общие настройки**\n\n"
-            "Здесь вы можете настроить основные параметры:\n"
-            "• 🔔 Уведомления - настройка уведомлений\n"
-            "• 📊 Отчеты - настройка отчетов\n"
-            "• 🎯 Цели - управление финансовыми целями\n"
-            "• 🔐 Безопасность - настройки безопасности\n\n"
-            "Функционал находится в разработке."
+            f"Валюта ввода по умолчанию: **{current}**.\n\n"
+            "Без пометки сумма считается в этой валюте.\n"
+            "Явно: `50000д кофе` или `1500 руб такси`.\n"
+            "Отчёты всегда в рублях. Донги пересчитываются "
+            "по курсу ЦБ на день записи."
         )
         
         keyboard = [
+            [
+                InlineKeyboardButton(
+                    text=f"🔁 Переключить на {other}",
+                    callback_data="settings_currency_toggle",
+                ),
+            ],
             [
                 InlineKeyboardButton(
                     text="🔙 Назад",
@@ -458,6 +472,19 @@ class SettingsHandler(BaseHandler):
             message,
             keyboard,
         )
+
+    async def handle_currency_toggle(
+        self,
+        update: Update | CallbackQuery,
+        context: ContextTypes.DEFAULT_TYPE,
+        telegram_user,
+    ) -> None:
+        from transactions.currencies import RUB, VND
+
+        current = getattr(telegram_user, 'default_currency', None) or RUB
+        telegram_user.default_currency = VND if current != VND else RUB
+        await telegram_user.asave(update_fields=['default_currency', 'updated_at'])
+        await self.handle_general_settings(update, context, telegram_user)
     
     async def handle_limits_settings(
         self,

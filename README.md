@@ -29,7 +29,7 @@ Python 3.11 · Django 4.2 · PostgreSQL · Redis · python-telegram-bot · Poetr
 
 - Учёт доходов/расходов с категориями
 - Бюджеты и лимиты (план/факт)
-- Telegram‑бот: `500 кофe`, меню, отчёты, Excel; **голосовой ввод** (см. `VOICE_ENABLED`)
+- Telegram‑бот: `500 кофe`, `50000д кофе`, меню, отчёты в рублях, Excel; **голосовой ввод** (см. `VOICE_ENABLED`)
 - Цели (конверты)
 - REST API + OpenAPI docs
 

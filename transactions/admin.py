@@ -1,6 +1,5 @@
 from django.contrib import admin
-from django.utils.html import format_html
-from .models import Transaction
+from .models import ExchangeRate, Transaction
 from categories.models import Category
 
 
@@ -8,6 +7,8 @@ from categories.models import Category
 class TransactionAdmin(admin.ModelAdmin):
     list_display = [
         'amount',
+        'currency',
+        'original_amount',
         'category',
         'description_short',
         'date',
@@ -33,7 +34,17 @@ class TransactionAdmin(admin.ModelAdmin):
     
     fieldsets = (
         ('Основная информация', {
-            'fields': ('amount', 'category', 'description', 'date')
+            'fields': (
+                'amount',
+                'currency',
+                'original_amount',
+                'exchange_rate',
+                'rate_date',
+                'rate_nominal',
+                'category',
+                'description',
+                'date',
+            ),
         }),
         ('Системная информация', {
             'fields': ('created_at', 'updated_at'),
@@ -47,6 +58,25 @@ class TransactionAdmin(admin.ModelAdmin):
             return obj.description[:50] + '...' if len(obj.description) > 50 else obj.description
         return '-'
     description_short.short_description = 'Описание'
+
+
+@admin.register(ExchangeRate)
+class ExchangeRateAdmin(admin.ModelAdmin):
+    list_display = [
+        'rate_date',
+        'base_currency',
+        'quote_currency',
+        'nominal',
+        'value',
+        'rate',
+        'fetched_on',
+        'source',
+    ]
+    list_filter = [
+        'base_currency',
+        'source',
+    ]
+    ordering = ['-rate_date']
     
     def get_queryset(self, request):
         qs = super().get_queryset(request)

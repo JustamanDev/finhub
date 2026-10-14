@@ -6,6 +6,8 @@ from django.contrib.auth.models import User
 from django.db import models
 from asgiref.sync import sync_to_async
 
+from transactions.currencies import RUB, VND
+from transactions.exchange import apply_entered_amount, rub_amount
 from transactions.models import Transaction
 from categories.models import Category
 from budgets.models import Budget
@@ -26,6 +28,7 @@ class TransactionService:
         transaction_type: str,
         transaction_date: Optional[date] = None,
         description: str = "",
+        currency: str = RUB,
     ) -> Transaction:
         """
         Создает новую транзакцию
@@ -36,6 +39,7 @@ class TransactionService:
             transaction_type: Тип транзакции ('expense' или 'income')
             transaction_date: Дата транзакции (по умолчанию сегодня)
             description: Описание транзакции
+            currency: Валюта введённой суммы. Донги переводятся в рубли.
             
         Returns:
             Созданная транзакция
@@ -45,17 +49,24 @@ class TransactionService:
         
         # Корректируем знак суммы в зависимости от типа
         if transaction_type == 'expense':
-            amount = -abs(amount)
+            signed = -abs(amount)
         else:
-            amount = abs(amount)
-        
-        transaction = await Transaction.objects.acreate(
-            user=self.user,
-            category=category,
-            amount=amount,
-            date=transaction_date,
-            description=description,
-        )
+            signed = abs(amount)
+
+        def _create() -> Transaction:
+            transaction = Transaction(
+                user=self.user,
+                category=category,
+                amount=signed,
+                date=transaction_date,
+                description=description,
+            )
+            apply_entered_amount(transaction, signed, currency or RUB)
+            transaction.save()
+            return transaction
+
+        transaction = await sync_to_async(_create, thread_sensitive=True)()
+        amount = transaction.amount
         
         logger.info(
             f"Создана транзакция: {amount}₽ "
@@ -139,9 +150,20 @@ class TransactionService:
             )
 
             if transaction.category.type == 'expense':
-                transaction.amount = -abs(new_amount)
+                signed = -abs(new_amount)
             else:
-                transaction.amount = abs(new_amount)
+                signed = abs(new_amount)
+
+            if transaction.currency == VND and transaction.exchange_rate:
+                transaction.original_amount = signed
+                transaction.amount = rub_amount(signed, transaction.exchange_rate)
+            else:
+                transaction.currency = RUB
+                transaction.original_amount = signed
+                transaction.exchange_rate = Decimal('1')
+                transaction.rate_date = None
+                transaction.rate_nominal = 1
+                transaction.amount = signed
 
             await transaction.asave()
             return transaction
