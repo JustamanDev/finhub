@@ -267,6 +267,16 @@ class VoiceInterpreter:
         return command
 
     def _try_regex_fast_path(self, text: str) -> ParsedVoiceCommand | None:
+        from telegram_bot.voice.period_parser import looks_like_advisor_question
+
+        if looks_like_advisor_question(text):
+            return ParsedVoiceCommand(
+                intent=VoiceIntentType.ASK_ADVISOR,
+                success=True,
+                confidence=1.0,
+                raw_transcript=text,
+            )
+
         budget = self._try_budget_fast_path(text)
         if budget:
             return budget

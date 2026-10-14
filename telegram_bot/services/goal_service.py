@@ -210,6 +210,29 @@ class GoalService:
             'net': net,
         }
 
+    async def recent_complete_month_nets(
+        self,
+        goal: Goal,
+        today: date,
+        limit: int = 3,
+    ) -> list[Decimal]:
+        """Нетто отложений за последние завершённые месяцы, от старых к новым."""
+        created = timezone.localtime(goal.created_at).date()
+        first_month = date(created.year, created.month, 1)
+        cursor = date(today.year, today.month, 1)
+        nets: list[Decimal] = []
+        for _ in range(limit):
+            if cursor.month == 1:
+                cursor = date(cursor.year - 1, 12, 1)
+            else:
+                cursor = date(cursor.year, cursor.month - 1, 1)
+            if cursor < first_month:
+                break
+            metrics = await self.get_goal_month_metrics(goal, cursor)
+            nets.append(metrics['net'])
+        nets.reverse()
+        return nets
+
     async def get_goal_card_data(
         self,
         goal_id: int,
@@ -248,6 +271,18 @@ class GoalService:
             remaining_this_month = max(planned_this_month - deposited_this_month, Decimal('0'))
 
         free_funds = await self.get_free_funds_for_month(today)
+        from telegram_bot.services.goal_eta import build_goal_eta
+
+        monthly_nets = await self.recent_complete_month_nets(goal, today)
+        eta = build_goal_eta(
+            today=today,
+            target=target,
+            balance=balance,
+            deadline=goal.deadline,
+            monthly_nets=monthly_nets,
+            deposited_this_month=deposited_this_month,
+            free_funds=free_funds,
+        )
 
         recommendations = await self.get_budget_underuse_recommendations(today)
 
@@ -264,6 +299,7 @@ class GoalService:
             'withdrawn_this_month': withdrawn_this_month,
             'remaining_this_month': remaining_this_month,
             'free_funds_this_month': free_funds,
+            'eta': eta,
             'recommendations': recommendations,
         }
 

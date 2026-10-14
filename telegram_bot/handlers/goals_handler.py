@@ -105,6 +105,13 @@ class GoalsHandler(BaseHandler):
             lines.append(f"• Внесено: {deposited_this_month:,.0f} ₽")
             lines.append(f"• Осталось внести: {remaining_this_month:,.0f} ₽")
 
+        from telegram_bot.services.goal_eta import format_goal_eta_lines
+
+        eta_lines = format_goal_eta_lines(data['eta'])
+        if eta_lines:
+            lines.append("")
+            lines.extend(eta_lines)
+
         lines.append("")
         lines.append(f"🧾 Свободно для трат в этом месяце: **{free_funds:,.0f} ₽**")
 

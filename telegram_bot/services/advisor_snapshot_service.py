@@ -65,7 +65,7 @@ class AdvisorSnapshotService:
         expense_categories, income_categories = self._split_category_stats(report)
 
         budgets = await self._month_budgets(year, month)
-        goals = await self._goals_summary(goal_service)
+        goals = await self._goals_summary(goal_service, today=today)
         recommendations = await goal_service.get_budget_underuse_recommendations(
             today=today,
         )
@@ -123,6 +123,7 @@ class AdvisorSnapshotService:
                 is_current=period.is_current,
             ),
             'goals': goals,
+            'goal_focus': await self._goal_focus(period.goal_hint, goals),
             'suggestions': [
                 {
                     'title': rec.title,
@@ -581,8 +582,16 @@ class AdvisorSnapshotService:
         rows.sort(key=lambda r: r['spent_percent'], reverse=True)
         return rows
 
-    async def _goals_summary(self, goal_service: GoalService) -> list[dict[str, Any]]:
+    async def _goals_summary(
+        self,
+        goal_service: GoalService,
+        *,
+        today: date,
+    ) -> list[dict[str, Any]]:
+        from telegram_bot.services.goal_eta import build_goal_eta
+
         goals = await goal_service.list_goals()
+        free_funds = await goal_service.get_free_funds_for_month(today)
         rows: list[dict[str, Any]] = []
         for goal in goals:
             if goal.status != goal.ACTIVE:
@@ -592,11 +601,56 @@ class AdvisorSnapshotService:
             progress = float(
                 (balance / target * 100).quantize(Decimal('0.1')),
             ) if target > 0 else 0.0
+            month_metrics = await goal_service.get_goal_month_metrics(goal, today)
+            monthly_nets = await goal_service.recent_complete_month_nets(goal, today)
+            eta = build_goal_eta(
+                today=today,
+                target=target,
+                balance=max(balance, Decimal('0')),
+                deadline=goal.deadline,
+                monthly_nets=monthly_nets,
+                deposited_this_month=month_metrics['deposits'],
+                free_funds=free_funds,
+            )
             rows.append({
                 'title': goal.title,
                 'target': _money(target),
                 'balance': _money(max(balance, Decimal('0'))),
                 'progress_percent': progress,
                 'deadline': goal.deadline.isoformat() if goal.deadline else None,
+                'eta': eta.as_dict(),
             })
         return rows
+
+    async def _goal_focus(
+        self,
+        hint: str | None,
+        goal_rows: list[dict[str, Any]],
+    ) -> dict[str, Any]:
+        if not hint:
+            return {
+                'status': 'none',
+                'hint': None,
+                'title': None,
+                'candidates': [],
+            }
+
+        def _resolve():
+            from telegram_bot.voice.goal_resolver import GoalResolver
+
+            return GoalResolver(self.user).resolve(hint)
+
+        resolved = await sync_to_async(_resolve, thread_sensitive=True)()
+        status = resolved.status.value
+        title = resolved.match.title if resolved.match is not None else None
+        candidates = [item.goal.title for item in resolved.candidates]
+        if status == 'unknown':
+            candidates = [row['title'] for row in goal_rows]
+        elif status == 'matched':
+            candidates = []
+        return {
+            'status': status,
+            'hint': hint,
+            'title': title,
+            'candidates': candidates,
+        }
