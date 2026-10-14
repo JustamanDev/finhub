@@ -404,10 +404,15 @@ class TextHandler(BaseHandler):
                     )
 
                     if updated:
+                        from transactions.formatting import format_transaction_amount
+
                         keyboard = ActionKeyboard.get_transaction_actions_keyboard(transaction_id)
                         await context.bot.send_message(
                             chat_id=update.effective_chat.id,
-                            text=f"✅ Сумма транзакции обновлена на {abs(updated.amount):,.2f}₽",
+                            text=(
+                                '✅ Сумма обновлена: '
+                                f'{format_transaction_amount(updated)}'
+                            ),
                             reply_markup=keyboard,
                         )
                     else:
@@ -655,10 +660,13 @@ class TextHandler(BaseHandler):
             if parsed.get('success'):
                 break
         if parsed.get('success') and parsed.get('type') == 'amount_only':
+            from telegram_bot.utils.currency_text import stash_entry_currency
+
             user_state.current_amount = parsed['amount']
             if parsed.get('transaction_type'):
                 user_state.last_transaction_type = parsed['transaction_type']
                 transaction_type = parsed['transaction_type']
+            stash_entry_currency(user_state, parsed.get('currency'))
             await user_state.asave()
             await self._command_executor.send_category_selection(
                 update,
@@ -667,6 +675,7 @@ class TextHandler(BaseHandler):
                 user_state.current_amount,
                 transaction_type,
                 voice_transcript=message_text,
+                currency=parsed.get('currency') or 'RUB',
             )
             return
 
@@ -693,11 +702,18 @@ class TextHandler(BaseHandler):
                 )
 
         if not resolved_category:
+            from telegram_bot.utils.currency_text import (
+                read_entry_currency,
+                stash_entry_currency,
+            )
+
             picker_type = transaction_type
             if parsed.get('success') and parsed.get('type') == 'amount_category':
                 picker_type = parsed.get('transaction_type') or transaction_type
             user_state.current_amount = tx_amount
             user_state.last_transaction_type = picker_type
+            entry_currency = parsed.get('currency') or read_entry_currency(user_state)
+            stash_entry_currency(user_state, entry_currency)
             await user_state.asave()
             await self._command_executor.send_category_selection(
                 update,
@@ -707,6 +723,7 @@ class TextHandler(BaseHandler):
                 picker_type,
                 prefix_message=f"Категория '{lookup_name}' не найдена.",
                 voice_transcript=message_text,
+                currency=entry_currency,
             )
             return
 
@@ -747,10 +764,13 @@ class TextHandler(BaseHandler):
             return
 
         try:
+            from telegram_bot.utils.currency_text import read_entry_currency
+
             transaction = await TransactionService(user).create_transaction(
                 amount=tx_amount,
                 category=resolved_category,
                 transaction_type=resolved_category.type,
+                currency=parsed.get('currency') or read_entry_currency(user_state),
             )
             user_state.current_amount = None
             user_state.awaiting_category = False
@@ -957,6 +977,7 @@ class TextHandler(BaseHandler):
             voice_create_after = bool(context_data.get('voice_create_after'))
             voice_intent = context_data.get('voice_intent') or ''
             pending_amount = user_state.current_amount
+            pending_currency = context_data.get('entry_currency') or 'RUB'
 
             # Сбрасываем состояние создания категории
             user_state.awaiting_category_creation = False
@@ -1016,6 +1037,7 @@ class TextHandler(BaseHandler):
                         amount=pending_amount,
                         category=category,
                         transaction_type=category.type,
+                        currency=pending_currency,
                     )
                     await self._command_executor.send_transaction_created(
                         update,

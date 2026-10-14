@@ -205,6 +205,8 @@ class ReportExportService:
                     "type": tx_type,
                     "category": category_label,
                     "amount": amount,
+                    "currency": getattr(t, "currency", None) or "RUB",
+                    "original_amount": getattr(t, "original_amount", None) or amount,
                     "comment": t.description or "",
                     "id": t.id,
                 }
@@ -477,15 +479,19 @@ class ReportExportService:
         ws_tx.set_column("B:B", 10)
         ws_tx.set_column("C:C", 32)
         ws_tx.set_column("D:D", 14)
-        ws_tx.set_column("E:E", 50)
-        ws_tx.set_column("F:F", 10)
+        ws_tx.set_column("E:E", 14)
+        ws_tx.set_column("F:F", 14)
+        ws_tx.set_column("G:G", 50)
+        ws_tx.set_column("H:H", 10)
 
         ws_tx.write(0, 0, "Дата", fmt_header)
         ws_tx.write(0, 1, "Тип", fmt_header)
         ws_tx.write(0, 2, "Категория", fmt_header)
-        ws_tx.write(0, 3, "Сумма", fmt_header)
-        ws_tx.write(0, 4, "Комментарий", fmt_header)
-        ws_tx.write(0, 5, "ID", fmt_header)
+        ws_tx.write(0, 3, "Сумма (₽)", fmt_header)
+        ws_tx.write(0, 4, "Валюта ввода", fmt_header)
+        ws_tx.write(0, 5, "Сумма ввода", fmt_header)
+        ws_tx.write(0, 6, "Комментарий", fmt_header)
+        ws_tx.write(0, 7, "ID", fmt_header)
 
         for idx, row in enumerate(tx_rows, start=1):
             ws_tx.write_datetime(idx, 0, datetime(row["date"].year, row["date"].month, row["date"].day), fmt_date)
@@ -493,8 +499,11 @@ class ReportExportService:
             ws_tx.write(idx, 2, row["category"])
             amt = Decimal(row["amount"])
             ws_tx.write_number(idx, 3, float(amt), fmt_money if amt >= 0 else fmt_money_red)
-            ws_tx.write(idx, 4, row["comment"])
-            ws_tx.write_number(idx, 5, int(row["id"]))
+            ws_tx.write(idx, 4, row.get("currency") or "RUB")
+            original = Decimal(row.get("original_amount") or amt)
+            ws_tx.write_number(idx, 5, float(original), fmt_money)
+            ws_tx.write(idx, 6, row["comment"])
+            ws_tx.write_number(idx, 7, int(row["id"]))
 
         workbook.close()
         output.seek(0)

@@ -285,6 +285,12 @@ class CallbackHandler(BaseHandler):
             elif query.data == "settings_general":
                 logger.info("Вызываем _handle_settings_general")
                 await self._handle_settings_general(query, context, telegram_user)
+            elif query.data == "settings_currency_toggle":
+                await self._handle_settings_currency_toggle(
+                    query,
+                    context,
+                    telegram_user,
+                )
             elif query.data == "category_add":
                 logger.info("Вызываем _handle_category_add")
                 await self._handle_category_add(query, context, telegram_user)
@@ -442,12 +448,15 @@ class CallbackHandler(BaseHandler):
                 return
 
             # Создаем транзакцию
+            from telegram_bot.utils.currency_text import read_entry_currency
+
             user = await sync_to_async(lambda: telegram_user.user)()
             transaction_service = TransactionService(user)
             transaction = await transaction_service.create_transaction(
                 amount=user_state.current_amount,
                 category=category,
                 transaction_type=category.type,
+                currency=read_entry_currency(user_state),
             )
 
             # Обновляем состояние
@@ -488,11 +497,18 @@ class CallbackHandler(BaseHandler):
                 new_type
             )
             
+            from telegram_bot.utils.currency_text import read_entry_currency
+            from transactions.formatting import format_entry_amount
+
             transaction_emoji = "💸" if new_type == "expense" else "💰"
             type_name = "расход" if new_type == "expense" else "доход"
+            amount_label = format_entry_amount(
+                user_state.current_amount,
+                read_entry_currency(user_state),
+            )
             
             message = (
-                f"{transaction_emoji} {user_state.current_amount:,.0f}₽ - "
+                f"{transaction_emoji} {amount_label} - "
                 f"выбери категорию ({type_name}):"
             )
             
@@ -540,12 +556,19 @@ class CallbackHandler(BaseHandler):
             page=0,
         )
         
+        from telegram_bot.utils.currency_text import read_entry_currency
+        from transactions.formatting import format_entry_amount
+
         user_state = await self.get_user_state(telegram_user)
         transaction_emoji = "💸" if transaction_type == "expense" else "💰"
         type_name = "расход" if transaction_type == "expense" else "доход"
+        amount_label = format_entry_amount(
+            user_state.current_amount,
+            read_entry_currency(user_state),
+        )
         
         message = (
-            f"{transaction_emoji} {user_state.current_amount:,.0f}₽ - "
+            f"{transaction_emoji} {amount_label} - "
             f"все категории ({type_name}):"
         )
         
@@ -561,12 +584,18 @@ class CallbackHandler(BaseHandler):
         transaction,
     ) -> None:
         """Отправляет подтверждение создания транзакции"""
-        transaction_emoji = "💸" if transaction.category.type == "expense" else "💰"
-        
+        from transactions.formatting import format_transaction_amount
+
+        money_lines = format_transaction_amount(transaction).splitlines()
         message = (
-            f"✅ {abs(transaction.amount):,.0f}₽ → "
+            f"✅ {money_lines[0]} → "
             f"{transaction.category.icon} {transaction.category.name}\n"
-            f"Добавлено {transaction.date.strftime('%d.%m.%Y')}"
+            + (
+                "\n".join(money_lines[1:]) + "\n"
+                if len(money_lines) > 1
+                else ""
+            )
+            + f"Добавлено {transaction.date.strftime('%d.%m.%Y')}"
         )
         
         keyboard = ActionKeyboard.get_transaction_actions_keyboard(
@@ -591,7 +620,20 @@ class CallbackHandler(BaseHandler):
         transaction_id = int(parts[2])
 
         if edit_type == 'amount':
+            from transactions.currencies import VND
+            from transactions.models import Transaction
+
             context.user_data['editing_transaction_amount'] = transaction_id
+            user = await sync_to_async(lambda: telegram_user.user)()
+            try:
+                editing = await Transaction.objects.aget(id=transaction_id, user=user)
+                amount_prompt = (
+                    "✏️ Введите новую сумму в донгах (например: 50000):"
+                    if editing.currency == VND
+                    else "✏️ Введите новую сумму в рублях (например: 5000 или 499.90):"
+                )
+            except Transaction.DoesNotExist:
+                amount_prompt = "✏️ Введите новую сумму (например: 5000 или 499.90):"
 
             keyboard = InlineKeyboardMarkup([
                 [
@@ -607,7 +649,7 @@ class CallbackHandler(BaseHandler):
             ])
 
             await safe_edit_message_text(query,
-                text="✏️ Введите новую сумму (например: 5000 или 499.90):",
+                text=amount_prompt,
                 reply_markup=keyboard,
             )
         elif edit_type == 'date':
@@ -961,6 +1003,21 @@ class CallbackHandler(BaseHandler):
         
         settings_handler = SettingsHandler()
         await settings_handler.handle_general_settings(
+            query,
+            context,
+            telegram_user,
+        )
+
+    async def _handle_settings_currency_toggle(
+        self,
+        query: CallbackQuery,
+        context: ContextTypes.DEFAULT_TYPE,
+        telegram_user,
+    ) -> None:
+        from telegram_bot.handlers.settings_handler import SettingsHandler
+
+        settings_handler = SettingsHandler()
+        await settings_handler.handle_currency_toggle(
             query,
             context,
             telegram_user,

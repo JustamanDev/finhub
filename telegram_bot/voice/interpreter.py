@@ -11,6 +11,12 @@ from pathlib import Path
 
 from django.contrib.auth.models import User
 from categories.models import Category
+from telegram_bot.utils.currency_text import (
+    CURRENCY_WORD,
+    currency_suffix,
+    detect_currency_mention,
+    normalize_currency_token,
+)
 from telegram_bot.utils.text_parser import TextCommandParser
 from telegram_bot.voice.config import openai_api_key, voice_llm_model
 from telegram_bot.voice.openai_client import format_openai_error, get_openai_client
@@ -71,21 +77,21 @@ RESPONSE_SCHEMA = {
 NATURAL_VOICE_RE = re.compile(
     r'(?i)^(?:добавь|запиши|создай|потрать|расход)\s+'
     r'(\d+(?:[.,]\d+)?)\s*'
-    r'(?:руб(?:лей|ля|ль)?\.?\s*)?'
+    rf'({CURRENCY_WORD}\.?\s*)?'
     r'(?:в\s+)?(?:категори(?:ю|и)\s+)?(.+?)[.\s]*$'
 )
 
 NATURAL_INCOME_VOICE_RE = re.compile(
     r'(?i)^(?:получил|заработал|доход|зачисли|пришло)\s+'
     r'(\d+(?:[.,]\d+)?)\s*'
-    r'(?:руб(?:лей|ля|ль)?\.?\s*)?'
+    r'(?:(?:руб(?:лей|ля|ль)?|vnd|dong|донг(?:ов|а|и)?|₽|₫|đ)\.?\s*)?'
     r'(?:(?:на\s+)?(?:категори(?:ю|и)\s+)?(.+?))?[.\s]*$'
 )
 
 NATURAL_INCOME_NOUN_RE = re.compile(
     r'(?i)^(?:зарплата|заработок)\s+'
     r'(\d+(?:[.,]\d+)?)\s*'
-    r'(?:руб(?:лей|ля|ль)?\.?\s*)?'
+    r'(?:(?:руб(?:лей|ля|ль)?|vnd|dong|донг(?:ов|а|и)?|₽|₫|đ)\.?\s*)?'
     r'(.+?)?[.\s]*$'
 )
 
@@ -97,13 +103,13 @@ BUDGET_VOICE_RE = re.compile(
     # amount-first: «5000 на продукты», «5000 рублей кафе»
     r'(?:на\s+)?'
     r'(\d+(?:[.,]\d+)?)\s*'
-    r'(?:руб(?:лей|ля|ль)?\.?\s*)?'
+    r'(?:(?:руб(?:лей|ля|ль)?|vnd|dong|донг(?:ов|а|и)?|₽|₫|đ)\.?\s*)?'
     r'(?:(?:на\s+)?(?:категори(?:ю|и)\s+)?(.+?))?'
     r'|'
     # category-first: «на категорию кафе 5000», «на транспорт 5000»
     r'(?:на\s+)?(?:категори(?:ю|и)\s+)?(.+?)\s+'
     r'(\d+(?:[.,]\d+)?)\s*'
-    r'(?:руб(?:лей|ля|ль)?\.?)?'
+    r'(?:(?:руб(?:лей|ля|ль)?|vnd|dong|донг(?:ов|а|и)?|₽|₫|đ)\.?)?'
     r'|'
     # category-only: «на транспорт», «на категорию кафе»
     r'(?:на\s+)?(?:категори(?:ю|и)\s+)?(.+?)'
@@ -117,7 +123,7 @@ GOAL_CREATE_RE = re.compile(
     r'(.+?)\s+'
     r'(?:на\s+)?'
     r'(\d+(?:[.,]\d+)?)\s*'
-    r'(?:руб(?:лей|ля|ль)?\.?)?[.\s]*$'
+    r'(?:(?:руб(?:лей|ля|ль)?|vnd|dong|донг(?:ов|а|и)?|₽|₫|đ)\.?)?[.\s]*$'
 )
 
 # «пополни цель отпуск на 5000», «пополни отпуск 5000»
@@ -127,18 +133,18 @@ GOAL_DEPOSIT_RE = re.compile(
     r'(.+?)\s+'
     r'(?:на\s+)?'
     r'(\d+(?:[.,]\d+)?)\s*'
-    r'(?:руб(?:лей|ля|ль)?\.?)?[.\s]*$'
+    r'(?:(?:руб(?:лей|ля|ль)?|vnd|dong|донг(?:ов|а|и)?|₽|₫|đ)\.?)?[.\s]*$'
 )
 
 # «сними 1000 с цели отпуск», «снять с отпуск 1000»
 GOAL_WITHDRAW_RE = re.compile(
     r'(?i)^(?:сними|снять|выведи|вывести)\s+'
     r'(?:(\d+(?:[.,]\d+)?)\s*)?'
-    r'(?:руб(?:лей|ля|ль)?\.?\s*)?'
+    r'(?:(?:руб(?:лей|ля|ль)?|vnd|dong|донг(?:ов|а|и)?|₽|₫|đ)\.?\s*)?'
     r'(?:с\s+)?(?:цели?\s+)?'
     r'(.+?)'
     r'(?:\s+(?:на\s+)?(\d+(?:[.,]\d+)?))?\s*'
-    r'(?:руб(?:лей|ля|ль)?\.?)?[.\s]*$'
+    r'(?:(?:руб(?:лей|ля|ль)?|vnd|dong|донг(?:ов|а|и)?|₽|₫|đ)\.?)?[.\s]*$'
 )
 
 
@@ -152,7 +158,7 @@ def _clean_budget_category_name(name: str) -> str:
     """Strip quotes, trailing amount crumbs, filler words from category span."""
     cleaned = (name or '').strip().strip('«»"\'.,;:')
     cleaned = re.sub(
-        r'(?i)\s+\d+(?:[.,]\d+)?\s*(?:руб(?:лей|ля|ль)?\.?)?\s*$',
+        r'(?i)\s+\d+(?:[.,]\d+)?\s*(?:(?:руб(?:лей|ля|ль)?|vnd|dong|донг(?:ов|а|и)?|₽|₫|đ)\.?)?\s*$',
         '',
         cleaned,
     ).strip()
@@ -163,12 +169,13 @@ def _clean_budget_category_name(name: str) -> str:
 
 
 def _compact_natural_phrase(text: str) -> str | None:
-    """«Добавь 500 рублей в категорию мобильный» → «500 мобильный»."""
+    """«Добавь 500 рублей в категорию мобильный» → «500р мобильный»."""
     match = NATURAL_VOICE_RE.match(text)
     if not match:
         return None
-    amount, category = match.groups()
-    return f'{amount} {category.strip().strip(".")}'
+    amount, currency_token, category = match.groups()
+    suffix = currency_suffix(normalize_currency_token(currency_token))
+    return f'{amount}{suffix} {category.strip().strip(".")}'
 
 
 def _compact_natural_income_phrase(text: str) -> str | None:
@@ -179,9 +186,10 @@ def _compact_natural_income_phrase(text: str) -> str | None:
             continue
         amount, category = match.groups()
         category = (category or '').strip().strip('.')
+        suffix = currency_suffix(detect_currency_mention(text))
         if category:
-            return f'+{amount} {category}'
-        return f'+{amount}'
+            return f'+{amount}{suffix} {category}'
+        return f'+{amount}{suffix}'
     return None
 
 
@@ -231,6 +239,8 @@ class VoiceInterpreter:
             fast = self._try_regex_fast_path(candidate)
             if fast:
                 fast.raw_transcript = text
+                if not fast.currency:
+                    fast.currency = detect_currency_mention(text)
                 log_voice_event(
                     'interpret',
                     path='regex',
@@ -244,6 +254,8 @@ class VoiceInterpreter:
             command = self._interpret_with_llm(expanded if expanded != text else text)
         if command.raw_transcript != text:
             command.raw_transcript = text
+        if not command.currency:
+            command.currency = detect_currency_mention(text)
         log_voice_event(
             'interpret',
             path='llm',
@@ -282,6 +294,7 @@ class VoiceInterpreter:
                     raw_transcript=text,
                     transaction_type=parsed['transaction_type'],
                     amount=parsed['amount'],
+                    currency=parsed.get('currency'),
                     category_name=parsed.get('category_name'),
                     category=parsed.get('category'),
                     description=parsed.get('description') or '',
@@ -295,6 +308,7 @@ class VoiceInterpreter:
                     raw_transcript=text,
                     transaction_type=parsed['transaction_type'],
                     amount=parsed['amount'],
+                    currency=parsed.get('currency'),
                     command_type='amount_only',
                 )
         return None
@@ -345,6 +359,7 @@ class VoiceInterpreter:
             raw_transcript=text,
             transaction_type='expense',
             amount=amount,
+            currency=detect_currency_mention(text),
             category_name=category_name or None,
             category=category,
             command_type='amount_category' if category_name else (

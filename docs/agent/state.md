@@ -2,8 +2,8 @@
 
 > **Source of truth.** Обновляй при завершении задач. Формат: дата + суть в 1–3 строки.
 
-**Обновлено:** 2026-07-09  
-**Стадия:** Production-ready core + активная разработка voice input  
+**Обновлено:** 2026-10-14  
+**Стадия:** Production-ready core + voice input; отчёты в рублях с автоконвертацией донгов  
 **Прогресс core:** ~85%
 
 ## Что работает
@@ -14,6 +14,7 @@
 - [x] Модульные settings dev/prod, Docker stack, Redis rate limit (prod)
 - [x] Дефолтные категории для новых пользователей, тексты бота в admin (`BotText`)
 - [x] Идемпотентный bootstrap Telegram-пользователя, resilient Telegram timeouts/proxy
+- [x] Ввод в рублях и донгах; отчёты в рублях по курсу ЦБ (курс дня замораживается на операции)
 
 ## В работе
 
@@ -49,6 +50,9 @@
 - `callback_handler.py`, `text_handler.py`, `settings_handler.py` — большие файлы
 
 ## Changelog (компактно)
+
+### 2026-10-14
+- VND→RUB: курс ЦБ раз в сутки, сумма в валюте ввода + рублёвый итог на транзакции. Отчёты остаются в рублях.
 
 ### 2026-07-10
 - ASK_ADVISOR category trends: category_hint + category_series via CategoryResolver

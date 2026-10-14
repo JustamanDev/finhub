@@ -22,7 +22,7 @@
 |-----|---------------|
 | `core` | `TimestampedModel`, middleware (API version, rate limit logging) |
 | `categories` | `Category`, `DefaultCategoryTemplate`; дефолты в `default_categories.py` |
-| `transactions` | `Transaction` (amount ±, category, date, description) |
+| `transactions` | `Transaction` (рублёвый итог + исходная валюта RUB/VND), `ExchangeRate` |
 | `budgets` | `Budget` (plan/fact, лимиты по категории/месяцу) |
 | `goals` | `Goal`, `GoalLedgerEntry` (конверты, deposit/withdraw) |
 | `telegram_bot` | `TelegramUser`, `UserState`, `BotText`, handlers, services |
@@ -37,6 +37,7 @@
 | Web | `manage.py runserver` / gunicorn (prod) |
 | Bot | `manage.py run_bot` → `telegram_bot/management/commands/run_bot.py` |
 | Migrations | `manage.py migrate` |
+| Курс VND→RUB | `manage.py fetch_exchange_rate` |
 | Admin | `/admin/` |
 | API docs | `/api/docs/`, `/api/redoc/` |
 

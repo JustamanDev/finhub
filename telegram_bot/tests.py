@@ -394,7 +394,7 @@ class VoiceInterpreterRegexTests(TestCase):
 
         self.assertEqual(
             _compact_natural_phrase('Добавь 500 рублей в категорию мобильный.'),
-            '500 мобильный',
+            '500р мобильный',
         )
 
     @patch('telegram_bot.voice.interpreter.openai_api_key', return_value='')

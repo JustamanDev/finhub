@@ -68,6 +68,12 @@
 | `WHISPER_PROMPT` | — | Подсказка Whisper (фин. термины RU/EN) |
 | `WHISPER_LANGUAGE` | — | ISO-код языка (`ru`), пусто = auto |
 
+## Курс донга
+
+Отдельного ключа нет. Бот сам запрашивает официальный XML ЦБ РФ (`https://www.cbr.ru/scripts/XML_daily.asp`) не чаще одного раза в сутки по Москве и кладёт курс в таблицу `ExchangeRate`.
+
+Ручной запрос: `python manage.py fetch_exchange_rate`.
+
 ## Пример `.env` для development
 
 ```env
