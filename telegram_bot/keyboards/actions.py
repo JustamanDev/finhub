@@ -146,7 +146,7 @@ class ActionKeyboard:
             ],
             [
                 InlineKeyboardButton(
-                    text="🎯 Бюджеты",
+                    text="📋 Бюджеты",
                     callback_data="show_budgets",
                 ),
                 InlineKeyboardButton(

@@ -149,6 +149,8 @@ class BudgetHandler(BaseHandler):
         budget_id: int,
     ) -> None:
         """Показывает детали бюджета"""
+        context.user_data.pop('waiting_for_budget_amount', None)
+        context.user_data.pop('editing_budget_id', None)
         from asgiref.sync import sync_to_async
         from budgets.models import Budget
         
@@ -217,6 +219,9 @@ class BudgetHandler(BaseHandler):
         telegram_user,
     ) -> None:
         """Показывает форму добавления бюджета"""
+        context.user_data.pop('waiting_for_budget_amount', None)
+        context.user_data.pop('budget_category_id', None)
+        context.user_data.pop('editing_budget_id', None)
         from asgiref.sync import sync_to_async
         from categories.models import Category
         

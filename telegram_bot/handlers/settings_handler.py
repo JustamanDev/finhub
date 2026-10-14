@@ -99,6 +99,7 @@ class SettingsHandler(BaseHandler):
         category_id: int,
     ) -> None:
         """Показывает действия с категорией"""
+        context.user_data.pop('renaming_category_id', None)
         user = await sync_to_async(lambda: telegram_user.user)()
         category_service = CategoryManagementService(user)
         
@@ -246,7 +247,30 @@ class SettingsHandler(BaseHandler):
         logger = logging.getLogger(__name__)
         
         logger.info(f"Начинаем создание категории для пользователя {telegram_user.id}")
-        
+        user_state = await self.get_user_state(telegram_user)
+        if user_state.awaiting_category_creation:
+            user_state.awaiting_category_creation = False
+            user_state.awaiting_category = False
+            user_state.current_amount = None
+            data = dict(user_state.context_data or {})
+            for key in (
+                'category_type',
+                'voice_create_after',
+                'voice_intent',
+                'suggested_name',
+            ):
+                data.pop(key, None)
+            user_state.context_data = data
+            await user_state.asave(
+                update_fields=[
+                    'awaiting_category_creation',
+                    'awaiting_category',
+                    'current_amount',
+                    'context_data',
+                    'updated_at',
+                ],
+            )
+
         message = (
             "➕ **Создание новой категории**\n\n"
             "Выберите тип категории:\n"
@@ -630,6 +654,7 @@ class SettingsHandler(BaseHandler):
         telegram_user,
     ) -> None:
         """Показывает форму добавления лимита"""
+        context.user_data.pop('limit_creation', None)
         message = (
             "➕ **Добавление лимита**\n\n"
             "Выберите категорию для установки лимита:\n\n"

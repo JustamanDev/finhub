@@ -170,7 +170,13 @@ class GoalsHandler(BaseHandler):
                         text="🔙 К цели",
                         callback_data=f"goal_view_{goal_id}",
                     )
-                ]
+                ],
+                [
+                    InlineKeyboardButton(
+                        text="🏠 Главное меню",
+                        callback_data="main_menu",
+                    )
+                ],
             ]
         )
         await self._send_or_edit_message(

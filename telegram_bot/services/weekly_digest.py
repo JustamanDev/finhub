@@ -343,16 +343,37 @@ def render_legacy_html(digest: WeeklyDigest) -> str:
 
 async def send_weekly_digest(bot, chat_id: int, digest: WeeklyDigest) -> None:
     """Шлёт статью. При ошибке API — обычное HTML-сообщение."""
+    from telegram_bot.keyboards.actions import ActionKeyboard
+
+    menu = ActionKeyboard.get_main_menu_keyboard()
+    rich_message = {
+        'html': render_rich_html(digest),
+        'skip_entity_detection': True,
+    }
     try:
         await bot.do_api_request(
             'sendRichMessage',
             api_kwargs={
                 'chat_id': chat_id,
-                'rich_message': {
-                    'html': render_rich_html(digest),
-                    'skip_entity_detection': True,
-                },
+                'rich_message': rich_message,
+                'reply_markup': menu.to_dict(),
             },
+        )
+        return
+    except Exception:
+        logger.exception('sendRichMessage с меню не прошёл, повторяю без клавиатуры')
+    try:
+        await bot.do_api_request(
+            'sendRichMessage',
+            api_kwargs={
+                'chat_id': chat_id,
+                'rich_message': rich_message,
+            },
+        )
+        await bot.send_message(
+            chat_id=chat_id,
+            text='Главное меню:',
+            reply_markup=menu,
         )
     except Exception:
         logger.exception('sendRichMessage не прошёл, отправляю обычный HTML')
@@ -360,6 +381,7 @@ async def send_weekly_digest(bot, chat_id: int, digest: WeeklyDigest) -> None:
             chat_id=chat_id,
             text=render_legacy_html(digest),
             parse_mode='HTML',
+            reply_markup=menu,
         )
 
 

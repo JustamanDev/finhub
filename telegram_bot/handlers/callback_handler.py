@@ -239,6 +239,14 @@ class CallbackHandler(BaseHandler):
                     telegram_user,
                     budget_id,
                 )
+            elif query.data.startswith('cancel_budget_delete_'):
+                budget_id = int(query.data.rsplit('_', 1)[-1])
+                await self._handle_budget_detail(
+                    query,
+                    context,
+                    telegram_user,
+                    budget_id,
+                )
             elif query.data.startswith('category_budget_'):
                 category_id = int(query.data.split('_')[2])
                 await self._handle_category_budget(
@@ -314,12 +322,12 @@ class CallbackHandler(BaseHandler):
             elif query.data.startswith("category_rename_"):
                 logger.info("Вызываем _handle_category_rename")
                 await self._handle_category_rename(query, context, telegram_user)
-            elif query.data.startswith("category_icon_"):
-                logger.info("Вызываем _handle_category_icon")
-                await self._handle_category_icon(query, context, telegram_user)
             elif query.data.startswith("category_icon_select_"):
                 logger.info("Вызываем _handle_category_icon_select")
                 await self._handle_category_icon_select(query, context, telegram_user)
+            elif query.data.startswith("category_icon_"):
+                logger.info("Вызываем _handle_category_icon")
+                await self._handle_category_icon(query, context, telegram_user)
             elif query.data.startswith("category_type_select_"):
                 logger.info("Вызываем _handle_category_type_select")
                 await self._handle_category_type_select(query, context, telegram_user)
@@ -338,6 +346,12 @@ class CallbackHandler(BaseHandler):
                 await self._handle_category_edit_selection(query, context, telegram_user)
             elif query.data.startswith("category_expense_"):
                 await self._handle_category_edit_selection(query, context, telegram_user)
+            elif query.data in (
+                'category_header_income',
+                'category_header_expense',
+                'no_action',
+            ):
+                await query.answer()
             elif query.data.startswith("category_"):
                 logger.info("Вызываем _handle_category_selection")
                 await self._handle_category_selection(query, context, telegram_user)
@@ -387,6 +401,9 @@ class CallbackHandler(BaseHandler):
                     telegram_user,
                     query.data.rsplit('_', 1)[-1],
                 )
+            elif query.data == 'entry_currency_cancel':
+                context.user_data.pop('pending_currency_entry', None)
+                await self._handle_main_menu(query, context, telegram_user)
             elif query.data.startswith('delete_transaction_'):
                 await self._handle_transaction_delete(query, context, telegram_user)
             else:
@@ -731,19 +748,34 @@ class CallbackHandler(BaseHandler):
         transaction_service = TransactionService(user)
         success = await transaction_service.delete_transaction(transaction_id)
         
+        from telegram_bot.keyboards.actions import ActionKeyboard
+
+        menu = ActionKeyboard.get_main_menu_keyboard()
         if success:
-            await safe_edit_message_text(query, text="🗑️ Транзакция удалена")
+            await safe_edit_message_text(
+                query,
+                text="🗑️ Транзакция удалена",
+                reply_markup=menu,
+            )
         else:
-            await safe_edit_message_text(query, text="❌ Транзакция не найдена")
+            await safe_edit_message_text(
+                query,
+                text="❌ Транзакция не найдена",
+                reply_markup=menu,
+            )
     
     async def _handle_unknown_callback(
         self,
         query: CallbackQuery,
         context: ContextTypes.DEFAULT_TYPE,
     ) -> None:
-        """Обрабатывает неизвестные callback"""
-        await safe_edit_message_text(query,
+        """Обрабатывает неизвестные callback и оставляет выход в меню."""
+        from telegram_bot.keyboards.actions import ActionKeyboard
+
+        await safe_edit_message_text(
+            query,
             text="❌ Неизвестная команда",
+            reply_markup=ActionKeyboard.get_main_menu_keyboard(),
         )
     
     async def _handle_amount_selection(
@@ -1434,21 +1466,7 @@ class CallbackHandler(BaseHandler):
         #
         # При этом сбрасываем transient-состояния ввода, чтобы следующий текст
         # не был случайно обработан как "введите дату/комментарий/сумму".
-        for key in (
-            'editing_transaction_amount',
-            'editing_transaction_date',
-            'editing_transaction_comment',
-            'waiting_for_budget_amount',
-            'budget_category_id',
-            'editing_budget_id',
-            'limit_creation',
-            'renaming_category_id',
-            'goal_creation_step',
-            'goal_creation_data',
-            'goal_deposit_goal_id',
-            'goal_withdraw_goal_id',
-        ):
-            context.user_data.pop(key, None)
+        await self.clear_transient_input(telegram_user, context)
 
         await query.answer()
         await query.message.reply_text(
