@@ -520,7 +520,10 @@ class VoiceInterpreter:
         from goals.models import Goal
 
         template = PROMPT_PATH.read_text(encoding='utf-8')
-        categories = Category.objects.filter(user=self.user).order_by('type', 'name')
+        categories = Category.objects.filter(
+            user=self.user,
+            is_active=True,
+        ).order_by('type', 'name')
         lines = [
             f'- [{cat.type}] {cat.name}'
             for cat in categories

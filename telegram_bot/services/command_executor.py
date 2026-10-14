@@ -875,9 +875,20 @@ class CommandExecutor:
         command: ParsedVoiceCommand = pending['command']
         user = await sync_to_async(lambda: telegram_user.user)()
         try:
-            category = await Category.objects.aget(id=category_id, user=user)
+            category = await Category.objects.aget(
+                id=category_id,
+                user=user,
+                is_active=True,
+            )
         except Category.DoesNotExist:
-            await update.callback_query.answer('Категория не найдена')
+            archived = await Category.objects.filter(
+                id=category_id,
+                user=user,
+                is_active=False,
+            ).aexists()
+            await update.callback_query.answer(
+                'Категория в архиве' if archived else 'Категория не найдена',
+            )
             return
 
         command.category = category

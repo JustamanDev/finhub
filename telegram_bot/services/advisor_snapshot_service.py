@@ -562,6 +562,7 @@ class AdvisorSnapshotService:
             Budget.objects.filter(
                 user=self.user,
                 is_active=True,
+                category__is_active=True,
                 start_date=start,
             ).select_related('category'),
         )

@@ -51,7 +51,7 @@ class SettingsHandler(BaseHandler):
             "Выберите действие:\n"
             "• ➕ Добавить категорию - создать новую\n"
             "• 📝 Редактировать - изменить существующие\n"
-            "• 🗑️ Удалить - удалить категории"
+            "• 📦 Архив - спрятать категорию из меню, операции останутся в отчётах"
         )
         
         await self._send_or_edit_message(
@@ -192,20 +192,41 @@ class SettingsHandler(BaseHandler):
             category_id,
         )
         
-        action_names = {
-            'delete': 'удаления',
-            'rename': 'переименования',
-            'icon': 'смены иконки',
-            'type': 'изменения типа',
-        }
-        
-        action_name = action_names.get(action, action)
-        
-        message = (
-            f"⚠️ **Подтверждение {action_name}**\n\n"
-            f"Вы уверены, что хотите {action_name} эту категорию?\n\n"
-            "Это действие нельзя отменить."
-        )
+        user = await sync_to_async(lambda: telegram_user.user)()
+        category = await CategoryManagementService(user).get_category_by_id(category_id)
+        if category is None:
+            await self._send_error_message(update, context, "Категория не найдена")
+            return
+
+        if action == 'delete':
+            message = (
+                f"📦 **Убрать {category.icon} {category.name} в архив?**\n\n"
+                "Категория пропадёт из меню и быстрого ввода. "
+                "Новую операцию в неё записать не получится.\n\n"
+                "Уже записанные операции останутся. В отчётах за месяцы, "
+                "где они были, категория будет видна со своими суммами.\n\n"
+                "Текущий лимит по ней тоже спрячется. "
+                "Вернуть категорию можно из архива."
+            )
+        elif action == 'restore':
+            message = (
+                f"📦 **Вернуть {category.icon} {category.name} в меню?**\n\n"
+                "Снова можно будет записывать в неё операции. "
+                "Текущий лимит тоже вернётся. "
+                "Прошлые суммы в отчётах и так на месте."
+            )
+        else:
+            action_names = {
+                'rename': 'переименования',
+                'icon': 'смены иконки',
+                'type': 'изменения типа',
+            }
+            action_name = action_names.get(action, action)
+            message = (
+                f"⚠️ **Подтверждение {action_name}**\n\n"
+                f"Вы уверены, что хотите {action_name} эту категорию?\n\n"
+                "Это действие нельзя отменить."
+            )
         
         await self._send_or_edit_message(
             update,
@@ -527,6 +548,7 @@ class SettingsHandler(BaseHandler):
             Budget.objects.filter(
                 user=user,
                 is_active=True,
+                category__is_active=True,
             ).select_related('category')
         )
         
@@ -743,6 +765,7 @@ class SettingsHandler(BaseHandler):
             Budget.objects.filter(
                 user=user,
                 is_active=True,
+                category__is_active=True,
             ).select_related('category')
         )
         
@@ -1041,21 +1064,38 @@ class SettingsHandler(BaseHandler):
             category_service = CategoryManagementService(user)
             
             if action == "delete":
-                # Удаляем категорию
-                success = await category_service.delete_category(category_id)
-                
-                if success:
+                archived = await category_service.archive_category(category_id)
+                if archived:
                     message = (
-                        "✅ **Категория удалена!**\n\n"
-                        "Категория была успешно удалена из вашего списка."
+                        f"✅ **{archived.icon} {archived.name} в архиве**\n\n"
+                        "В меню и быстром вводе её больше нет. "
+                        "Операции на месте: отчёты за прошлые месяцы покажут те же суммы."
                     )
                 else:
+                    message = "❌ **Не удалось убрать категорию в архив.**"
+                keyboard = [
+                    [
+                        InlineKeyboardButton(
+                            text="📦 Архив",
+                            callback_data="category_archive"
+                        ),
+                    ],
+                    [
+                        InlineKeyboardButton(
+                            text="🔙 Назад к категориям",
+                            callback_data="settings_categories"
+                        ),
+                    ],
+                ]
+            elif action == "restore":
+                restored = await category_service.restore_category(category_id)
+                if restored:
                     message = (
-                        "❌ **Не удалось удалить категорию**\n\n"
-                        "Возможно, у категории есть связанные транзакции. "
-                        "Сначала удалите все транзакции в этой категории."
+                        f"✅ **{restored.icon} {restored.name} снова в меню**\n\n"
+                        "Можно записывать новые операции. Прошлые суммы не менялись."
                     )
-                
+                else:
+                    message = "❌ **Не удалось вернуть категорию.**"
                 keyboard = [
                     [
                         InlineKeyboardButton(
@@ -1064,7 +1104,8 @@ class SettingsHandler(BaseHandler):
                         ),
                     ],
                 ]
-                
+
+            if action in ("delete", "restore"):
                 await self._send_or_edit_message(
                     update,
                     context,
@@ -1084,6 +1125,46 @@ class SettingsHandler(BaseHandler):
                 context,
                 f"Ошибка при выполнении действия: {str(e)}"
             )
+
+    async def handle_category_archive(
+        self,
+        update: Update | CallbackQuery,
+        context: ContextTypes.DEFAULT_TYPE,
+        telegram_user,
+    ) -> None:
+        """Список категорий, скрытых из меню."""
+        user = await sync_to_async(lambda: telegram_user.user)()
+        archived = await CategoryManagementService(user).get_archived_categories()
+        if not archived:
+            message = (
+                "📦 **Архив пуст**\n\n"
+                "Сюда попадают категории, которые больше не нужны в меню. "
+                "Их операции остаются в отчётах."
+            )
+            keyboard = SettingsKeyboard.get_categories_keyboard()
+        else:
+            message = (
+                "📦 **Архив**\n\n"
+                "Эти категории скрыты из меню и быстрого ввода. "
+                "Операции по ним на месте. Нажмите, чтобы вернуть."
+            )
+            buttons = [
+                [
+                    InlineKeyboardButton(
+                        text=f"{category.icon} {category.name}",
+                        callback_data=f"category_restore_{category.id}",
+                    ),
+                ]
+                for category in archived
+            ]
+            buttons.append([
+                InlineKeyboardButton(
+                    text="🔙 Назад",
+                    callback_data="settings_categories",
+                ),
+            ])
+            keyboard = buttons
+        await self._send_or_edit_message(update, context, message, keyboard)
 
     async def handle_category_rename_prompt(
         self,

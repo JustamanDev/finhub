@@ -138,11 +138,17 @@ class CategoryResolver:
             return ResolveResult(status=ResolveStatus.UNKNOWN, query=query)
 
         if categories is None:
-            qs = Category.objects.filter(user=self.user, type=transaction_type)
+            qs = Category.objects.filter(
+                user=self.user,
+                type=transaction_type,
+                is_active=True,
+            )
             category_list = list(qs)
         else:
             category_list = [
-                c for c in categories if getattr(c, 'type', None) == transaction_type
+                c for c in categories
+                if getattr(c, 'type', None) == transaction_type
+                and getattr(c, 'is_active', True)
             ]
 
         scored: list[CategoryCandidate] = []

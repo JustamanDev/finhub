@@ -53,6 +53,12 @@ class SettingsKeyboard:
             ],
             [
                 InlineKeyboardButton(
+                    text="📦 Архив",
+                    callback_data="category_archive"
+                ),
+            ],
+            [
+                InlineKeyboardButton(
                     text="🔙 Назад",
                     callback_data="settings"
                 ),
@@ -137,7 +143,7 @@ class SettingsKeyboard:
                     callback_data=f"category_type_{category_id}"
                 ),
                 InlineKeyboardButton(
-                    text="🗑️ Удалить",
+                    text="📦 В архив",
                     callback_data=f"category_delete_{category_id}"
                 ),
             ],
@@ -220,15 +226,19 @@ class SettingsKeyboard:
         category_id: int
     ) -> InlineKeyboardMarkup:
         """Клавиатура подтверждения действия"""
+        yes_text = "✅ Убрать в архив" if action == "delete" else "✅ Да"
+        no_callback = (
+            "category_archive" if action == "restore" else f"category_actions_{category_id}"
+        )
         keyboard = [
             [
                 InlineKeyboardButton(
-                    text="✅ Да",
+                    text=yes_text if action != "restore" else "✅ Вернуть",
                     callback_data=f"category_confirm_{action}_{category_id}"
                 ),
                 InlineKeyboardButton(
                     text="❌ Нет",
-                    callback_data=f"category_actions_{category_id}"
+                    callback_data=no_callback,
                 ),
             ],
         ]

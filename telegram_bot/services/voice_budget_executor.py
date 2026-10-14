@@ -60,6 +60,8 @@ def upsert_monthly_budget(
     """Create or update active monthly budget for the current calendar month."""
     if category.type != 'expense':
         raise ValueError('Бюджет можно задать только для категории расходов.')
+    if not category.is_active:
+        raise ValueError('Категория в архиве. Верните её в меню, чтобы задать лимит.')
 
     amount = Decimal(str(amount)).copy_abs()
     if amount <= 0:

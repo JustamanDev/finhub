@@ -13,7 +13,10 @@ def build_user_whisper_prompt(user: User, *, max_names: int = 40) -> str:
     """Combine env WHISPER_PROMPT with user category/goal names for bias."""
     base = whisper_prompt()
     names: list[str] = []
-    categories = Category.objects.filter(user=user).order_by('name')[:max_names]
+    categories = Category.objects.filter(
+        user=user,
+        is_active=True,
+    ).order_by('name')[:max_names]
     names.extend(cat.name for cat in categories)
     goals = Goal.objects.filter(user=user, status=Goal.ACTIVE).order_by(
         '-created_at',

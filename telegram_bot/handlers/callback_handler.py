@@ -301,6 +301,8 @@ class CallbackHandler(BaseHandler):
             elif query.data == "category_edit":
                 logger.info("Вызываем _handle_category_edit")
                 await self._handle_category_edit(query, context, telegram_user)
+            elif query.data == "category_archive":
+                await self._handle_category_archive(query, context, telegram_user)
             elif query.data == "category_delete":
                 logger.info("Вызываем _handle_category_delete")
                 await self._handle_category_delete(query, context, telegram_user)
@@ -327,6 +329,8 @@ class CallbackHandler(BaseHandler):
             elif query.data.startswith("category_confirm_"):
                 logger.info("Вызываем _handle_category_confirm")
                 await self._handle_category_confirm(query, context, telegram_user)
+            elif query.data.startswith("category_restore_"):
+                await self._handle_category_restore(query, context, telegram_user)
             elif query.data.startswith("category_delete_"):
                 logger.info("Вызываем _handle_category_delete")
                 await self._handle_category_delete(query, context, telegram_user)
@@ -414,6 +418,13 @@ class CallbackHandler(BaseHandler):
             )
         except Category.DoesNotExist:
             await safe_edit_message_text(query, text="❌ Категория не найдена")
+            return
+
+        if not category.is_active:
+            await safe_edit_message_text(
+                query,
+                text="📦 Эта категория в архиве. Выберите другую или верните её в меню.",
+            )
             return
         
         # Получаем состояние пользователя
@@ -1150,6 +1161,45 @@ class CallbackHandler(BaseHandler):
         else:
             await query.answer("Ошибка: неверный ID категории")
     
+    async def _handle_category_archive(
+        self,
+        query: CallbackQuery,
+        context: ContextTypes.DEFAULT_TYPE,
+        telegram_user,
+    ) -> None:
+        from telegram_bot.handlers.settings_handler import SettingsHandler
+
+        await SettingsHandler().handle_category_archive(
+            query,
+            context,
+            telegram_user,
+        )
+
+    async def _handle_category_restore(
+        self,
+        query: CallbackQuery,
+        context: ContextTypes.DEFAULT_TYPE,
+        telegram_user,
+    ) -> None:
+        from telegram_bot.handlers.settings_handler import SettingsHandler
+
+        parts = query.data.split('_')
+        if len(parts) < 3:
+            await query.answer("Ошибка: неверный ID категории")
+            return
+        try:
+            category_id = int(parts[2])
+        except ValueError:
+            await query.answer("Ошибка: неверный ID категории")
+            return
+        await SettingsHandler().handle_category_confirmation(
+            query,
+            context,
+            telegram_user,
+            "restore",
+            category_id,
+        )
+
     async def _handle_category_delete(
         self,
         query: CallbackQuery,

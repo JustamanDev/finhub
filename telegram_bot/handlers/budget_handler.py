@@ -70,6 +70,7 @@ class BudgetHandler(BaseHandler):
             Budget.objects.filter(
                 user=user,
                 is_active=True,
+                category__is_active=True,
             ).select_related('category')
         )
         
