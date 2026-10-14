@@ -645,6 +645,16 @@ class CallbackHandler(BaseHandler):
             text=message,
             reply_markup=keyboard,
         )
+        from telegram_bot.services.budget_alerts import (
+            breaches_of,
+            send_budget_breaches,
+        )
+
+        await send_budget_breaches(
+            context.bot,
+            query.message.chat_id,
+            breaches_of(transaction),
+        )
     
     async def _handle_transaction_edit(
         self,

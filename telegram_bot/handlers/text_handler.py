@@ -405,6 +405,10 @@ class TextHandler(BaseHandler):
 
                     if updated:
                         from transactions.formatting import format_transaction_amount
+                        from telegram_bot.services.budget_alerts import (
+                            breaches_of,
+                            send_budget_breaches,
+                        )
 
                         keyboard = ActionKeyboard.get_transaction_actions_keyboard(transaction_id)
                         await context.bot.send_message(
@@ -414,6 +418,11 @@ class TextHandler(BaseHandler):
                                 f'{format_transaction_amount(updated)}'
                             ),
                             reply_markup=keyboard,
+                        )
+                        await send_budget_breaches(
+                            context.bot,
+                            update.effective_chat.id,
+                            breaches_of(updated),
                         )
                     else:
                         await context.bot.send_message(
@@ -445,11 +454,21 @@ class TextHandler(BaseHandler):
                     updated = await transaction_service.update_transaction_date(transaction_id, new_date)
 
                     if updated:
+                        from telegram_bot.services.budget_alerts import (
+                            breaches_of,
+                            send_budget_breaches,
+                        )
+
                         keyboard = ActionKeyboard.get_transaction_actions_keyboard(transaction_id)
                         await context.bot.send_message(
                             chat_id=update.effective_chat.id,
                             text=f"✅ Дата транзакции обновлена на {new_date.strftime('%d.%m.%Y')}",
                             reply_markup=keyboard,
+                        )
+                        await send_budget_breaches(
+                            context.bot,
+                            update.effective_chat.id,
+                            breaches_of(updated),
                         )
                     else:
                         await context.bot.send_message(
@@ -1170,6 +1189,7 @@ class TextHandler(BaseHandler):
             user = await sync_to_async(lambda: telegram_user.user)()
             logger.info(f"✅ Пользователь получен: {user.username}")
             
+            limit_breach = None
             # Проверяем, редактируем ли мы существующий бюджет
             editing_budget_id = context.user_data.get('editing_budget_id')
             logger.info(f"🔍 ID редактируемого бюджета: {editing_budget_id}")
@@ -1194,6 +1214,12 @@ class TextHandler(BaseHandler):
                     logger.info(f"🔄 Обновляем сумму с {budget_amount} на {amount}")
                     await sync_to_async(lambda: setattr(budget, 'amount', amount))()
                     await sync_to_async(budget.save)()
+                    from telegram_bot.services.budget_alerts import breach_after_limit_change
+
+                    limit_breach = await sync_to_async(breach_after_limit_change)(
+                        budget,
+                        Decimal(str(budget_amount)),
+                    )
                     logger.info("✅ Бюджет обновлен успешно")
                     
                     action_text = "обновлен"
@@ -1275,9 +1301,17 @@ class TextHandler(BaseHandler):
                     
                     if existing_budget:
                         logger.info("🔄 Найден существующий бюджет: id=%s", existing_budget.id)
-                        # Обновляем существующий бюджет
+                        previous_limit = await sync_to_async(
+                            lambda: existing_budget.amount,
+                        )()
                         await sync_to_async(lambda: setattr(existing_budget, 'amount', amount))()
                         await sync_to_async(existing_budget.save, thread_sensitive=True)()
+                        from telegram_bot.services.budget_alerts import breach_after_limit_change
+
+                        limit_breach = await sync_to_async(breach_after_limit_change)(
+                            existing_budget,
+                            Decimal(str(previous_limit)),
+                        )
                         logger.info("✅ Существующий бюджет обновлен")
                         action_text = "обновлен"
                     else:
@@ -1291,6 +1325,12 @@ class TextHandler(BaseHandler):
                             start_date=start_date,
                             end_date=end_date
                         ), thread_sensitive=True)()
+                        from telegram_bot.services.budget_alerts import breach_after_limit_change
+
+                        limit_breach = await sync_to_async(breach_after_limit_change)(
+                            budget,
+                            None,
+                        )
                         logger.info(f"✅ Новый бюджет создан: {budget}")
                         action_text = "создан"
                     
@@ -1379,6 +1419,14 @@ class TextHandler(BaseHandler):
                 reply_markup=keyboard,
                 parse_mode='Markdown'
             )
+            if limit_breach is not None:
+                from telegram_bot.services.budget_alerts import send_budget_breaches
+
+                await send_budget_breaches(
+                    context.bot,
+                    update.effective_chat.id,
+                    [limit_breach],
+                )
             logger.info("✅ Сообщение отправлено успешно")
             
         except Exception as e:
@@ -1485,6 +1533,12 @@ class TextHandler(BaseHandler):
                 end_date=current_date.replace(day=28),   # Последний день месяца
                 is_active=True,
             ))()
+            from telegram_bot.services.budget_alerts import (
+                breach_after_limit_change,
+                send_budget_breaches,
+            )
+
+            limit_breach = await sync_to_async(breach_after_limit_change)(budget, None)
             
             message = (
                 f"✅ **Бюджет создан**\n\n"
@@ -1525,6 +1579,12 @@ class TextHandler(BaseHandler):
                 message,
                 keyboard,
             )
+            if limit_breach is not None:
+                await send_budget_breaches(
+                    context.bot,
+                    update.effective_chat.id,
+                    [limit_breach],
+                )
             
         except Exception as e:
             logger.error(f"❌ Ошибка в _handle_limit_amount_input: {e}")
