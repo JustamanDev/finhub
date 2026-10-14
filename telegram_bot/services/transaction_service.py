@@ -10,7 +10,10 @@ from transactions.currencies import RUB, VND
 from transactions.exchange import apply_entered_amount, rub_amount
 from transactions.models import Transaction
 from categories.models import Category
-from budgets.models import Budget
+from telegram_bot.services.budget_alerts import (
+    breaches_after_spend,
+    snapshot_spent,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -54,6 +57,7 @@ class TransactionService:
             signed = abs(amount)
 
         def _create() -> Transaction:
+            before = snapshot_spent(self.user, category, transaction_date)
             transaction = Transaction(
                 user=self.user,
                 category=category,
@@ -63,6 +67,12 @@ class TransactionService:
             )
             apply_entered_amount(transaction, signed, currency or RUB)
             transaction.save()
+            transaction._budget_breaches = breaches_after_spend(
+                self.user,
+                category,
+                transaction_date,
+                before,
+            )
             return transaction
 
         transaction = await sync_to_async(_create, thread_sensitive=True)()
@@ -90,20 +100,32 @@ class TransactionService:
         Returns:
             Обновленная транзакция или None если не найдена
         """
-        try:
-            transaction = await Transaction.objects.aget(
-                id=transaction_id,
-                user=self.user,
-            )
+        def _update_date():
+            try:
+                transaction = Transaction.objects.select_related('category').get(
+                    id=transaction_id,
+                    user=self.user,
+                )
+            except Transaction.DoesNotExist:
+                return None
+            before = snapshot_spent(self.user, transaction.category, new_date)
             transaction.date = new_date
-            await transaction.asave()
+            transaction.save()
+            transaction._budget_breaches = breaches_after_spend(
+                self.user,
+                transaction.category,
+                new_date,
+                before,
+            )
             return transaction
-        except Transaction.DoesNotExist:
+
+        transaction = await sync_to_async(_update_date, thread_sensitive=True)()
+        if transaction is None:
             logger.warning(
                 f"Транзакция {transaction_id} не найдена "
                 f"для пользователя {self.user.id}"
             )
-            return None
+        return transaction
     
     async def update_transaction_description(
         self,
@@ -143,12 +165,20 @@ class TransactionService:
         - для расходов сумма хранится отрицательной
         - для доходов сумма хранится положительной
         """
-        try:
-            transaction = await Transaction.objects.aget(
-                id=transaction_id,
-                user=self.user,
-            )
+        def _update_amount():
+            try:
+                transaction = Transaction.objects.select_related('category').get(
+                    id=transaction_id,
+                    user=self.user,
+                )
+            except Transaction.DoesNotExist:
+                return None
 
+            before = snapshot_spent(
+                self.user,
+                transaction.category,
+                transaction.date,
+            )
             if transaction.category.type == 'expense':
                 signed = -abs(new_amount)
             else:
@@ -165,10 +195,16 @@ class TransactionService:
                 transaction.rate_nominal = 1
                 transaction.amount = signed
 
-            await transaction.asave()
+            transaction.save()
+            transaction._budget_breaches = breaches_after_spend(
+                self.user,
+                transaction.category,
+                transaction.date,
+                before,
+            )
             return transaction
-        except Transaction.DoesNotExist:
-            return None
+
+        return await sync_to_async(_update_amount, thread_sensitive=True)()
     
     async def delete_transaction(
         self,

@@ -376,6 +376,21 @@ class CommandExecutor:
             text='\n'.join(lines),
             reply_markup=keyboard,
         )
+        from telegram_bot.services.budget_alerts import (
+            breach_after_limit_change,
+            send_budget_breaches,
+        )
+
+        breach = await sync_to_async(breach_after_limit_change)(
+            budget,
+            None if created else previous_amount,
+        )
+        if breach is not None:
+            await send_budget_breaches(
+                context.bot,
+                update.effective_chat.id,
+                [breach],
+            )
 
     async def execute_manage_goal(
         self,
@@ -1175,6 +1190,16 @@ class CommandExecutor:
             chat_id=update.effective_chat.id,
             text='\n'.join(lines),
             reply_markup=keyboard,
+        )
+        from telegram_bot.services.budget_alerts import (
+            breaches_of,
+            send_budget_breaches,
+        )
+
+        await send_budget_breaches(
+            context.bot,
+            update.effective_chat.id,
+            breaches_of(transaction),
         )
 
     async def send_error(
