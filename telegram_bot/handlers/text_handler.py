@@ -918,6 +918,7 @@ class TextHandler(BaseHandler):
             "🔧 Команды:\n"
             "• /start - главное меню\n"
             "• /stats - статистика\n"
+            "• /week - сводка текущей недели\n"
             "• /help - эта справка"
         )
         

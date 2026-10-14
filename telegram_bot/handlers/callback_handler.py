@@ -351,6 +351,8 @@ class CallbackHandler(BaseHandler):
             elif query.data == "main_menu":
                 logger.info("Вызываем _handle_main_menu")
                 await self._handle_main_menu(query, context, telegram_user)
+            elif query.data == 'weekly_digest':
+                await self._handle_weekly_digest(query, context, telegram_user)
             elif query.data == "show_report":
                 logger.info("Вызываем _handle_show_report")
                 await self._handle_show_report(query, context, telegram_user)
@@ -1560,6 +1562,22 @@ class CallbackHandler(BaseHandler):
         handler = GoalsHandler()
         await handler.handle_goal_view(query, context, telegram_user, goal_id)
     
+    async def _handle_weekly_digest(
+        self,
+        query: CallbackQuery,
+        context: ContextTypes.DEFAULT_TYPE,
+        telegram_user,
+    ) -> None:
+        """Кнопка «Неделя»: статья за текущую неделю."""
+        await query.answer()
+        from telegram_bot.services.weekly_digest import push_current_week
+
+        await push_current_week(
+            context.bot,
+            telegram_user,
+            query.message.chat.id,
+        )
+
     async def _handle_show_report(
         self,
         query: CallbackQuery,

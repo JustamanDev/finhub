@@ -149,6 +149,7 @@ class CommandHandler(BaseHandler):
                 "📊 Команды:\n"
                 "• /start - главное меню\n"
                 "• /stats - статистика за сегодня\n"
+                "• /week - сводка текущей недели\n"
                 "• /help - эта справка"
             )
             
@@ -166,6 +167,31 @@ class CommandHandler(BaseHandler):
                 '/help',
             )
             
+        except Exception as e:
+            await self.handle_error(update, context, e)
+
+    async def week_command(
+        self,
+        update: Update,
+        context: ContextTypes.DEFAULT_TYPE,
+    ) -> None:
+        """Показывает сводку текущей недели статьёй с таблицами."""
+        try:
+            telegram_user = await self.get_or_create_telegram_user(
+                update.effective_user,
+            )
+            from telegram_bot.services.weekly_digest import push_current_week
+
+            await push_current_week(
+                context.bot,
+                telegram_user,
+                update.effective_chat.id,
+            )
+            await self.log_message(
+                telegram_user,
+                'incoming',
+                '/week',
+            )
         except Exception as e:
             await self.handle_error(update, context, e)
     
