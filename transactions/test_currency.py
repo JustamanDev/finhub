@@ -7,7 +7,10 @@ from django.contrib.auth.models import User
 from django.test import TestCase
 
 from categories.models import Category
-from telegram_bot.utils.currency_text import parse_leading_amount
+from telegram_bot.utils.currency_text import (
+    explicit_entry_currency,
+    parse_leading_amount,
+)
 from telegram_bot.utils.text_parser import TextCommandParser
 from transactions.currencies import RUB, VND
 from transactions.exchange import apply_entered_amount, parse_cbr_vnd_xml, rub_amount
@@ -92,12 +95,20 @@ class TextParserCurrencyTests(TestCase):
             type=Category.EXPENSE,
         )
 
-    def test_unmarked_amount_stays_rubles(self):
+    def test_unmarked_amount_does_not_pick_currency(self):
         parsed = TextCommandParser(self.user).parse('500 кофе')
         self.assertTrue(parsed['success'])
         self.assertEqual(parsed['amount'], Decimal('500'))
-        self.assertEqual(parsed['currency'], RUB)
+        self.assertIsNone(parsed['currency'])
+        self.assertIsNone(explicit_entry_currency(parsed))
         self.assertEqual(parsed['category'].id, self.category.id)
+
+    def test_spoken_thousands_are_an_amount(self):
+        parsed = TextCommandParser(self.user).parse('210 тысяч')
+        self.assertTrue(parsed['success'])
+        self.assertEqual(parsed['type'], 'amount_only')
+        self.assertEqual(parsed['amount'], Decimal('210000'))
+        self.assertIsNone(parsed['currency'])
 
     def test_dong_mark_does_not_stick_to_category(self):
         parsed = TextCommandParser(self.user).parse('50000д кофе')
