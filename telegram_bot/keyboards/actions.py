@@ -156,6 +156,10 @@ class ActionKeyboard:
             ],
             [
                 InlineKeyboardButton(
+                    text="📅 Неделя",
+                    callback_data="weekly_digest",
+                ),
+                InlineKeyboardButton(
                     text="⚙️ Настройки",
                     callback_data="settings",
                 ),

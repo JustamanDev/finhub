@@ -17,6 +17,7 @@ from telegram_bot.handlers.text_handler import TextHandler
 from telegram_bot.handlers.voice_handler import VoiceHandler
 from telegram_bot.handlers.callback_handler import CallbackHandler
 from telegram_bot.handlers.command_handler import CommandHandler as BotCommandHandler
+from telegram_bot.services.weekly_digest import weekly_digest_loop
 from telegram_bot.utils.admin_alerts import notify_admins_about_exception
 from telegram_bot.utils.telegram_resilience import retry_telegram_call
 
@@ -184,6 +185,12 @@ class Command(BaseCommand):
                     command_handler.stats_command,
                 )
             )
+            application.add_handler(
+                CommandHandler(
+                    'week',
+                    command_handler.week_command,
+                )
+            )
             
             # Регистрируем обработчик текстовых сообщений
             application.add_handler(
@@ -233,6 +240,7 @@ class Command(BaseCommand):
                     [
                         BotCommand('start', 'Главное меню'),
                         BotCommand('stats', 'Статистика за сегодня'),
+                        BotCommand('week', 'Сводка текущей недели'),
                         BotCommand('help', 'Справка по использованию'),
                     ]
                 ),
@@ -253,6 +261,9 @@ class Command(BaseCommand):
             await application.updater.start_polling(
                 timeout=_env_int("TELEGRAM_POLLING_TIMEOUT", 30),
             )
+            digest_task = asyncio.create_task(
+                weekly_digest_loop(application.bot),
+            )
             
             # Ждем остановки
             try:
@@ -262,6 +273,11 @@ class Command(BaseCommand):
             except KeyboardInterrupt:
                 pass
             finally:
+                digest_task.cancel()
+                try:
+                    await digest_task
+                except asyncio.CancelledError:
+                    pass
                 await application.stop()
                 await application.shutdown()
             
