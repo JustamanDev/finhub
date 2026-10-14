@@ -110,6 +110,46 @@ class BaseHandler:
         )
         return tg_user
     
+    async def clear_transient_input(self, telegram_user: TelegramUser, context) -> None:
+        """Сбрасывает режим «жду текст», чтобы следующее сообщение не ушло не туда."""
+        for key in (
+            'editing_transaction_amount',
+            'editing_transaction_date',
+            'editing_transaction_comment',
+            'waiting_for_budget_amount',
+            'budget_category_id',
+            'editing_budget_id',
+            'limit_creation',
+            'renaming_category_id',
+            'goal_creation_step',
+            'goal_creation_data',
+            'goal_deposit_goal_id',
+            'goal_withdraw_goal_id',
+            'pending_currency_entry',
+            'voice_pending',
+            'voice_category_pending',
+            'voice_goal_pending',
+            'voice_dialog',
+        ):
+            context.user_data.pop(key, None)
+
+        state = await self.get_user_state(telegram_user)
+        data = dict(state.context_data or {})
+        data.pop('category_type', None)
+        update_fields = []
+        if state.awaiting_category:
+            state.awaiting_category = False
+            update_fields.append('awaiting_category')
+        if state.awaiting_category_creation:
+            state.awaiting_category_creation = False
+            update_fields.append('awaiting_category_creation')
+        if data != (state.context_data or {}):
+            state.context_data = data
+            update_fields.append('context_data')
+        if update_fields:
+            update_fields.append('updated_at')
+            await state.asave(update_fields=update_fields)
+
     async def get_user_state(self, telegram_user: TelegramUser) -> UserState:
         """
         Получает состояние пользователя

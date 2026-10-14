@@ -141,6 +141,12 @@ class CommandExecutor:
                     callback_data='entry_currency_VND',
                 ),
             ],
+            [
+                InlineKeyboardButton(
+                    'Отмена',
+                    callback_data='entry_currency_cancel',
+                ),
+            ],
         ])
         query = update.callback_query
         if query is not None:

@@ -80,6 +80,7 @@ class CommandHandler(BaseHandler):
                     update.effective_user
                 )
             )
+            await self.clear_transient_input(telegram_user, context)
 
             welcome_template = await self._get_bot_text(
                 slug="welcome_message",
