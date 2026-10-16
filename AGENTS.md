@@ -11,7 +11,8 @@
 | 3 | [docs/agent/architecture.md](docs/agent/architecture.md) | Потоки данных, ключевые модули |
 | 4 | [docs/agent/conventions.md](docs/agent/conventions.md) | Куда класть код, паттерны |
 | 5 | [docs/agent/roadmap.md](docs/agent/roadmap.md) | Фазы и приоритеты |
-| 6 | [docs/agent/voice-input.md](docs/agent/voice-input.md) | Текущая фича в разработке |
+| 6 | [docs/agent/ideas.md](docs/agent/ideas.md) | Идеи, которые ещё не делаем |
+| — | [docs/agent/voice-input.md](docs/agent/voice-input.md) | Голос уже в проде, план как справочник |
 | — | [docs/agent/git-workflow.md](docs/agent/git-workflow.md) | Только при ветках / коммитах / PR |
 
 Полная карта: [docs/README.md](docs/README.md)
@@ -26,9 +27,9 @@
 
 ## Активная разработка
 
-**Фаза:** voice input MVP завершён; следующий шаг — расширение voice + analytics.
+**Фаза:** бот в проде. Учёт, отчёты в рублях, цели и конверты, голос, консультант. Новая работа не начата.
 
-План voice: [docs/agent/voice-input.md](docs/agent/voice-input.md).
+Идеи на обсуждение (подписка, общий конверт): [docs/agent/ideas.md](docs/agent/ideas.md). План голоса, уже сданного: [docs/agent/voice-input.md](docs/agent/voice-input.md).
 
 ## Правила для агентов
 
