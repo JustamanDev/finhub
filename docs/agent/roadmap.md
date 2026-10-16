@@ -14,33 +14,32 @@ Text input, budgets, reports, Excel, goals MVP, default categories, prod resilie
 
 Details: [voice-input.md](voice-input.md)
 
-## Фаза 3 — Voice expansion
+## Фаза 3 — Voice expansion (done)
 
-- State-aware voice (edit transaction, budget amount, goals)
-- Voice: budgets, goals (intents SET_BUDGET, MANAGE_GOAL)
-- Whisper prompt tuning per user categories
+Голос умеет лимиты (`SET_BUDGET`) и цели (`MANAGE_GOAL`: создать, пополнить, снять).
 
-## Фаза 4 — Analytics & advisor
+## Фаза 4 — Analytics & advisor (done)
 
-- Rich analytics (cashflow, trends)
-- ASK_ADVISOR intent: LLM + ReportService recommendations
-- Optional: push notifications on budget exceed
+Консультант отвечает по снимку: периоды, тренды, категории, срок цели. Бот один раз пишет, когда трата переходит лимит.
 
-## Фаза 5 — Platform
+## Фаза 5 — Дальше
 
-- Frontend dashboard (Next.js — planned, not in repo)
-- Debts module, trading module (vision in old TECHNICAL_ARCHITECTURE)
-- Mobile-friendly web
+Не начато. Подробности идей, которые надо сначала обсудить: [ideas.md](ideas.md).
 
-## Приоритеты (Q3 2026)
+- Подписка: три тарифа, на верхнем — голос и консультант
+- Общий конверт для пары
+- Модуль долгов
+- Frontend dashboard (Next.js — в vision, не в repo)
+- Трейдинг (старая vision, не в repo)
 
-1. Voice expansion (Phase 3): budgets/goals voice, prompt tuning
-2. Refactor large handlers
-3. Goal module polish + budget recommendations
-4. Frontend — after voice stable
+## Приоритеты
+
+Живой продукт — учёт, отчёты, цели и конверты, голос, консультант. Новые куски не пишутся, пока идея из [ideas.md](ideas.md) не разобрана словами.
+
+Крупные хендлеры бота по-прежнему стоит резать, когда их снова трогают.
 
 ## Out of scope (пока)
 
-- Multi-currency
+- Multi-currency сверх рубля и донга
 - Bank sync / Open Banking
 - Mobile native apps

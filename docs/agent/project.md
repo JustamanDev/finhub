@@ -2,7 +2,7 @@
 
 ## Назначение
 
-Личный финансовый хаб: учёт доходов/расходов, бюджеты, цели, отчёты. Основной UX — Telegram-бот (`500 кофе`, меню, inline-клавиатуры). REST API для будущего фронтенда.
+Личный финансовый хаб: учёт доходов/расходов, бюджеты, цели и конверты, отчёты. Основной UX — Telegram-бот (`500 кофе`, меню, inline-клавиатуры). REST API для будущего фронтенда. Один пользователь — свои деньги. Общих конвертов и подписки нет: это идеи в [ideas.md](ideas.md).
 
 ## Стек
 
@@ -24,7 +24,7 @@
 | `categories` | `Category`, `DefaultCategoryTemplate`; дефолты в `default_categories.py` |
 | `transactions` | `Transaction` (рублёвый итог + исходная валюта RUB/VND), `ExchangeRate` |
 | `budgets` | `Budget` (plan/fact, лимиты по категории/месяцу) |
-| `goals` | `Goal`, `GoalLedgerEntry` (конверты, deposit/withdraw) |
+| `goals` | `Goal` (`kind`: цель `savings` или конверт `envelope`; `status` включая `archived`), `GoalLedgerEntry` (deposit / withdraw / spend) |
 | `telegram_bot` | `TelegramUser`, `UserState`, `BotText`, handlers, services |
 | `api` | URL routing v1 |
 
