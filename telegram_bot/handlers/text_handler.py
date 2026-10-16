@@ -8,6 +8,7 @@ from .base import BaseHandler
 from telegram_bot.keyboards.categories import CategoryKeyboard
 from telegram_bot.keyboards.actions import ActionKeyboard
 from telegram_bot.services.command_executor import CommandExecutor
+from telegram_bot.services.goal_spend import GoalSpendShortfall
 from telegram_bot.services.transaction_service import TransactionService
 from telegram_bot.services.category_management_service import CategoryManagementService
 from telegram_bot.services.goal_service import GoalService
@@ -398,10 +399,17 @@ class TextHandler(BaseHandler):
 
                     user = await sync_to_async(lambda: telegram_user.user)()
                     transaction_service = TransactionService(user)
-                    updated = await transaction_service.update_transaction_amount(
-                        transaction_id,
-                        new_amount,
-                    )
+                    try:
+                        updated = await transaction_service.update_transaction_amount(
+                            transaction_id,
+                            new_amount,
+                        )
+                    except GoalSpendShortfall as exc:
+                        await context.bot.send_message(
+                            chat_id=update.effective_chat.id,
+                            text=f'❌ {exc}',
+                        )
+                        return
 
                     if updated:
                         from transactions.formatting import format_transaction_amount
@@ -410,12 +418,20 @@ class TextHandler(BaseHandler):
                             send_budget_breaches,
                         )
 
-                        keyboard = ActionKeyboard.get_transaction_actions_keyboard(transaction_id)
+                        from telegram_bot.services.goal_spend import goal_spend_note
+
+                        note = await sync_to_async(goal_spend_note, thread_sensitive=True)(
+                            updated.id,
+                        )
+                        keyboard = ActionKeyboard.get_transaction_actions_keyboard(
+                            transaction_id,
+                            from_goal=updated.amount < 0,
+                        )
                         await context.bot.send_message(
                             chat_id=update.effective_chat.id,
                             text=(
                                 '✅ Сумма обновлена: '
-                                f'{format_transaction_amount(updated)}'
+                                f'{format_transaction_amount(updated)}{note}'
                             ),
                             reply_markup=keyboard,
                         )
@@ -459,10 +475,21 @@ class TextHandler(BaseHandler):
                             send_budget_breaches,
                         )
 
-                        keyboard = ActionKeyboard.get_transaction_actions_keyboard(transaction_id)
+                        from telegram_bot.services.goal_spend import goal_spend_note
+
+                        note = await sync_to_async(goal_spend_note, thread_sensitive=True)(
+                            updated.id,
+                        )
+                        keyboard = ActionKeyboard.get_transaction_actions_keyboard(
+                            transaction_id,
+                            from_goal=updated.amount < 0,
+                        )
                         await context.bot.send_message(
                             chat_id=update.effective_chat.id,
-                            text=f"✅ Дата транзакции обновлена на {new_date.strftime('%d.%m.%Y')}",
+                            text=(
+                                f"✅ Дата транзакции обновлена на "
+                                f"{new_date.strftime('%d.%m.%Y')}{note}"
+                            ),
                             reply_markup=keyboard,
                         )
                         await send_budget_breaches(
@@ -495,10 +522,18 @@ class TextHandler(BaseHandler):
                 updated = await transaction_service.update_transaction_description(transaction_id, comment_text)
 
                 if updated:
-                    keyboard = ActionKeyboard.get_transaction_actions_keyboard(transaction_id)
+                    from telegram_bot.services.goal_spend import goal_spend_note
+
+                    note = await sync_to_async(goal_spend_note, thread_sensitive=True)(
+                        updated.id,
+                    )
+                    keyboard = ActionKeyboard.get_transaction_actions_keyboard(
+                        transaction_id,
+                        from_goal=updated.amount < 0,
+                    )
                     await context.bot.send_message(
                         chat_id=update.effective_chat.id,
-                        text="✅ Комментарий обновлён.",
+                        text=f'✅ Комментарий обновлён.{note}',
                         reply_markup=keyboard,
                     )
                 else:

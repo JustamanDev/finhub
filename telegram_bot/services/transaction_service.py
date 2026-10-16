@@ -111,6 +111,9 @@ class TransactionService:
             before = snapshot_spent(self.user, transaction.category, new_date)
             transaction.date = new_date
             transaction.save()
+            from telegram_bot.services.goal_spend import move_linked_spend
+
+            move_linked_spend(transaction)
             transaction._budget_breaches = breaches_after_spend(
                 self.user,
                 transaction.category,
@@ -195,7 +198,14 @@ class TransactionService:
                 transaction.rate_nominal = 1
                 transaction.amount = signed
 
+            from telegram_bot.services.goal_spend import (
+                ensure_spend_fits,
+                resize_linked_spend,
+            )
+
+            ensure_spend_fits(transaction, abs(transaction.amount))
             transaction.save()
+            resize_linked_spend(transaction)
             transaction._budget_breaches = breaches_after_spend(
                 self.user,
                 transaction.category,
@@ -223,6 +233,11 @@ class TransactionService:
             transaction = await Transaction.objects.aget(
                 id=transaction_id,
                 user=self.user,
+            )
+            from telegram_bot.services.goal_spend import release_linked_spend
+
+            await sync_to_async(release_linked_spend, thread_sensitive=True)(
+                transaction.id,
             )
             await transaction.adelete()
             logger.info(

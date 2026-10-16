@@ -13,6 +13,8 @@ class ActionKeyboard:
     @staticmethod
     def get_transaction_actions_keyboard(
         transaction_id: int,
+        *,
+        from_goal: bool = False,
     ) -> InlineKeyboardMarkup:
         """
         Создает клавиатуру с действиями для транзакции
@@ -45,6 +47,16 @@ class ActionKeyboard:
                 ),
             ],
         ]
+        if from_goal:
+            buttons.insert(
+                1,
+                [
+                    InlineKeyboardButton(
+                        text="Из цели",
+                        callback_data=f"tx_goal_{transaction_id}",
+                    ),
+                ],
+            )
 
         keyboard = InlineKeyboardMarkup(buttons)
         return attach_persistent_navigation(
