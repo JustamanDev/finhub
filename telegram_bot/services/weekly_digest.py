@@ -59,8 +59,9 @@ class BudgetRow:
 class GoalRow:
     title: str
     balance: Decimal
-    target: Decimal
+    target: Decimal | None
     note: str
+    kind: str = 'savings'
 
 
 @dataclass(frozen=True)
@@ -255,22 +256,22 @@ def render_rich_html(digest: WeeklyDigest) -> str:
     else:
         parts.append('<p>Активных лимитов на эту неделю нет.</p>')
 
-    parts.append('<h2>Цели</h2>')
+    parts.append('<h2>Цели и конверты</h2>')
     if digest.goal_rows:
         parts.append(_rich_table(
-            'Цели',
-            ('Цель', 'Собрано', 'К сроку'),
+            'Цели и конверты',
+            ('Название', 'Сумма', 'К сроку'),
             [
                 (
                     row.title,
-                    f'{format_rub(row.balance)} / {format_rub(row.target)}',
+                    _goal_collected(row),
                     row.note,
                 )
                 for row in digest.goal_rows
             ],
         ))
     else:
-        parts.append('<p>Активных целей нет.</p>')
+        parts.append('<p>Активных целей и конвертов нет.</p>')
 
     if digest.in_progress:
         footer = (
@@ -329,15 +330,14 @@ def render_legacy_html(digest: WeeklyDigest) -> str:
         lines.append('Активных лимитов на эту неделю нет.')
 
     lines.append('')
-    lines.append('<b>Цели</b>')
+    lines.append('<b>Цели и конверты</b>')
     if digest.goal_rows:
         for row in digest.goal_rows:
             lines.append(
-                f'• {escape(row.title)}: {escape(format_rub(row.balance))} '
-                f'из {escape(format_rub(row.target))} — {escape(row.note)}',
+                f'• {escape(row.title)}: {escape(_goal_collected(row))} — {escape(row.note)}',
             )
     else:
-        lines.append('Активных целей нет.')
+        lines.append('Активных целей и конвертов нет.')
     return '\n'.join(lines)
 
 
@@ -538,18 +538,38 @@ def _budget_rows(user, start: date, end: date) -> tuple[BudgetRow, ...]:
     return tuple(rows)
 
 
+def _goal_collected(row: GoalRow) -> str:
+    if row.kind == 'envelope':
+        return f'лежит {format_rub(row.balance)}'
+    target = row.target if row.target is not None else Decimal('0')
+    return f'{format_rub(row.balance)} / {format_rub(target)}'
+
+
 def _goal_rows(user, today: date) -> tuple[GoalRow, ...]:
+    from goals.ledger import ledger_totals
+
     goals = Goal.objects.filter(user=user, status=Goal.ACTIVE).order_by('title')
     month_free = _month_free_funds(user, today)
     rows = []
     for goal in goals[:_MAX_GOAL_ROWS]:
-        balance = _goal_balance(goal)
+        totals = ledger_totals(goal.id)
+        balance = max(totals.balance, Decimal('0'))
+        if goal.is_envelope:
+            rows.append(GoalRow(
+                title=goal.title,
+                balance=balance,
+                target=None,
+                note='конверт',
+                kind='envelope',
+            ))
+            continue
         deposited = _month_deposits(goal, today)
         nets = _recent_complete_nets(goal, today)
+        committed = max(totals.committed, Decimal('0'))
         eta = build_goal_eta(
             today=today,
-            target=Decimal(goal.target_amount),
-            balance=balance,
+            target=Decimal(goal.target_amount or 0),
+            balance=committed,
             deadline=goal.deadline,
             monthly_nets=nets,
             deposited_this_month=deposited,
@@ -557,8 +577,8 @@ def _goal_rows(user, today: date) -> tuple[GoalRow, ...]:
         )
         rows.append(GoalRow(
             title=goal.title,
-            balance=balance,
-            target=Decimal(goal.target_amount),
+            balance=committed,
+            target=Decimal(goal.target_amount or 0),
             note=_goal_note(eta),
         ))
     return tuple(rows)
@@ -616,10 +636,13 @@ def _month_deposits(goal: Goal, today: date) -> Decimal:
 
 
 def _month_net(goal: Goal, month: date) -> Decimal:
+    """Темп копилки: взносы и снятия. Покупка из цели темп не сбивает."""
     start_dt, end_dt = _aware_month_bounds(month)
     total = goal.entries.filter(
         occurred_at__gte=start_dt,
         occurred_at__lt=end_dt,
+    ).exclude(
+        entry_type=GoalLedgerEntry.SPEND,
     ).aggregate(total=Coalesce(Sum('amount'), Decimal('0')))['total']
     return Decimal(total or 0)
 

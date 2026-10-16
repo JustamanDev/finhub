@@ -12,6 +12,7 @@ from django.db.models.functions import Coalesce
 from django.utils import timezone
 
 from budgets.models import Budget
+from goals.ledger import ledger_totals
 from goals.models import (
     Goal,
     GoalLedgerEntry,
@@ -19,6 +20,10 @@ from goals.models import (
 from transactions.models import Transaction
 
 logger = logging.getLogger(__name__)
+
+
+class GoalTitleTaken(Exception):
+    """Название уже занято активной записью или архивом другого типа."""
 
 
 @dataclass(frozen=True)
@@ -44,20 +49,85 @@ class GoalService:
     async def create_goal(
         self,
         title: str,
-        target_amount: Decimal,
+        target_amount: Optional[Decimal] = None,
         deadline: Optional[date] = None,
+        kind: str = Goal.SAVINGS,
     ) -> Goal:
+        title = (title or '').strip()
+        if kind == Goal.ENVELOPE:
+            target_amount = None
+            deadline = None
+        elif target_amount is None or Decimal(target_amount) <= 0:
+            raise ValueError('Целевая сумма должна быть больше нуля.')
+
+        existing = await sync_to_async(
+            lambda: list(Goal.objects.filter(user=self.user, title=title)),
+            thread_sensitive=True,
+        )()
+        for goal in existing:
+            if goal.status == Goal.ARCHIVED and goal.kind == kind:
+                goal.status = Goal.ACTIVE
+                update_fields = ['status', 'updated_at']
+                if kind == Goal.SAVINGS:
+                    goal.target_amount = target_amount
+                    goal.deadline = deadline
+                    update_fields.extend(['target_amount', 'deadline'])
+                await sync_to_async(goal.save)(update_fields=update_fields)
+                return goal
+            if goal.status == Goal.ARCHIVED:
+                raise GoalTitleTaken(
+                    'Такое название лежит в архиве у другого типа. '
+                    'Верните ту запись или выберите другое имя.',
+                )
+            raise GoalTitleTaken(
+                f'«{goal.title}» уже есть. '
+                'Выберите другое название или уберите старую запись в архив.',
+            )
+
         return await Goal.objects.acreate(
             user=self.user,
             title=title,
+            kind=kind,
             target_amount=target_amount,
             deadline=deadline,
         )
 
+    async def create_envelope(
+        self,
+        title: str,
+        initial: Decimal = Decimal('0'),
+    ) -> Goal:
+        goal = await self.create_goal(title, kind=Goal.ENVELOPE)
+        if initial and Decimal(initial) > 0:
+            await self.add_deposit(goal.id, Decimal(initial))
+        return goal
+
     async def list_goals(self) -> list[Goal]:
         return await sync_to_async(list)(
-            Goal.objects.filter(user=self.user).order_by('-created_at'),
+            Goal.objects.filter(user=self.user, status=Goal.ACTIVE).order_by('kind', 'title'),
         )
+
+    async def list_archived(self) -> list[Goal]:
+        return await sync_to_async(list)(
+            Goal.objects.filter(user=self.user, status=Goal.ARCHIVED).order_by('title'),
+        )
+
+    async def archive_goal(self, goal_id: int) -> Optional[Goal]:
+        """Прячет из списков. Журнал и резерв денег не трогает."""
+        goal = await self.get_goal(goal_id)
+        if not goal:
+            return None
+        goal.status = Goal.ARCHIVED
+        await sync_to_async(goal.save)(update_fields=['status', 'updated_at'])
+        return goal
+
+    async def restore_goal(self, goal_id: int) -> Optional[Goal]:
+        goal = await self.get_goal(goal_id)
+        if not goal:
+            return None
+        goal.status = Goal.ACTIVE
+        await sync_to_async(goal.save)(update_fields=['status', 'updated_at'])
+        return goal
 
     async def get_goal(self, goal_id: int) -> Optional[Goal]:
         try:
@@ -192,11 +262,15 @@ class GoalService:
             occurred_at__lt=end_dt,
         )
         deposits = await sync_to_async(
-            lambda: qs.filter(amount__gt=0).aggregate(total=Coalesce(models.Sum('amount'), Decimal('0')))['total'],
+            lambda: qs.filter(entry_type=GoalLedgerEntry.DEPOSIT).aggregate(
+                total=Coalesce(models.Sum('amount'), Decimal('0')),
+            )['total'],
             thread_sensitive=True,
         )()
         withdraws = await sync_to_async(
-            lambda: qs.filter(amount__lt=0).aggregate(total=Coalesce(models.Sum('amount'), Decimal('0')))['total'],
+            lambda: qs.filter(entry_type=GoalLedgerEntry.WITHDRAW).aggregate(
+                total=Coalesce(models.Sum('amount'), Decimal('0')),
+            )['total'],
             thread_sensitive=True,
         )()
 
@@ -243,20 +317,22 @@ class GoalService:
             return None
 
         today = today or timezone.localdate()
-        balance = await self.get_goal_balance(goal_id)
-        balance = max(balance, Decimal('0'))
+        totals = await sync_to_async(ledger_totals, thread_sensitive=True)(goal_id)
+        balance = max(totals.balance, Decimal('0'))
+        committed = max(totals.committed, Decimal('0'))
 
-        target = Decimal(goal.target_amount)
-        remaining_total = max(target - balance, Decimal('0'))
+        target = Decimal(goal.target_amount or 0)
+        remaining_total = Decimal('0')
         progress_pct = Decimal('0')
-        if target > 0:
-            progress_pct = (balance / target) * Decimal('100')
+        if goal.kind == Goal.SAVINGS and target > 0:
+            remaining_total = max(target - committed, Decimal('0'))
+            progress_pct = (committed / target) * Decimal('100')
 
-        # План по месяцам
+        # План по месяцам — только у цели с дедлайном. Конверт ничего не копит.
         months_remaining = None
         planned_per_month = None
         planned_this_month = None
-        if goal.deadline and goal.deadline >= today:
+        if goal.kind == Goal.SAVINGS and goal.deadline and goal.deadline >= today:
             months_remaining = self._months_inclusive(today, goal.deadline)
             if months_remaining > 0:
                 planned_per_month = (remaining_total / Decimal(months_remaining)).quantize(Decimal('0.01'))
@@ -273,22 +349,28 @@ class GoalService:
         free_funds = await self.get_free_funds_for_month(today)
         from telegram_bot.services.goal_eta import build_goal_eta
 
-        monthly_nets = await self.recent_complete_month_nets(goal, today)
-        eta = build_goal_eta(
-            today=today,
-            target=target,
-            balance=balance,
-            deadline=goal.deadline,
-            monthly_nets=monthly_nets,
-            deposited_this_month=deposited_this_month,
-            free_funds=free_funds,
-        )
-
-        recommendations = await self.get_budget_underuse_recommendations(today)
+        eta = None
+        recommendations: list[GoalRecommendation] = []
+        if goal.kind == Goal.SAVINGS:
+            monthly_nets = await self.recent_complete_month_nets(goal, today)
+            eta = build_goal_eta(
+                today=today,
+                target=target,
+                balance=committed,
+                deadline=goal.deadline,
+                monthly_nets=monthly_nets,
+                deposited_this_month=deposited_this_month,
+                free_funds=free_funds,
+            )
+            recommendations = await self.get_budget_underuse_recommendations(today)
 
         return {
             'goal': goal,
             'balance': balance,
+            'committed': committed,
+            'spent': totals.spent,
+            'deposited_total': totals.deposited,
+            'withdrawn_total': totals.withdrawn,
             'target': target,
             'remaining_total': remaining_total,
             'progress_pct': progress_pct,

@@ -8,9 +8,9 @@ from typing import Iterable
 
 from asgiref.sync import sync_to_async
 from django.contrib.auth.models import User
-from django.db import models
 from django.utils import timezone
 
+from goals.ledger import LedgerTotals, ledger_totals
 from goals.models import (
     Goal,
     GoalLedgerEntry,
@@ -45,7 +45,10 @@ class ReportExportService:
         start_date, end_date = self._month_range(year, month)
         transactions = await self._get_transactions(start_date, end_date)
         goals = await self._get_goals()
-        goal_balances = await self._get_goal_balances()
+        goal_parts = await sync_to_async(
+            lambda: {goal.id: ledger_totals(goal.id) for goal in goals},
+            thread_sensitive=True,
+        )()
         goal_entries = await self._get_goal_entries(start_date, end_date)
 
         report_title = f"FinHub — отчет за {month:02d}.{year}"
@@ -57,7 +60,7 @@ class ReportExportService:
             end_date=end_date,
             transactions=transactions,
             goals=goals,
-            goal_balances=goal_balances,
+            goal_parts=goal_parts,
             goal_entries=goal_entries,
         )
 
@@ -96,18 +99,6 @@ class ReportExportService:
             Goal.objects.filter(user=self.user).order_by('created_at', 'id')
         )
 
-    async def _get_goal_balances(self) -> dict[int, Decimal]:
-        qs = (
-            GoalLedgerEntry.objects.filter(goal__user=self.user)
-            .values('goal_id')
-            .annotate(total=models.Sum('amount'))
-        )
-        rows = await sync_to_async(list)(qs)
-        return {
-            int(r['goal_id']): Decimal(r['total'] or 0)
-            for r in rows
-        }
-
     async def _get_goal_entries(
         self,
         start_date: date,
@@ -133,7 +124,7 @@ class ReportExportService:
         end_date: date,
         transactions: Iterable[Transaction],
         goals: list[Goal],
-        goal_balances: dict[int, Decimal],
+        goal_parts: dict[int, LedgerTotals],
         goal_entries: list[GoalLedgerEntry],
     ) -> bytes:
         try:
@@ -250,24 +241,26 @@ class ReportExportService:
         ws_summary.write_number(5, 1, float(total_expenses), fmt_money)
         ws_summary.write(6, 0, "Денежный поток (доходы − расходы)", fmt_h2)
         ws_summary.write_number(6, 1, float(net), fmt_money if net >= 0 else fmt_money_red)
-        ws_summary.write(7, 0, "Отложено в цели (net)", fmt_h2)
+        ws_summary.write(7, 0, "Отложено в цели и конверты (net)", fmt_h2)
         ws_summary.write_number(
             7,
             1,
             float(allocations_month),
             fmt_money if allocations_month >= 0 else fmt_money_red,
         )
-        ws_summary.write(8, 0, "Свободно (с учетом целей)", fmt_h2)
+        ws_summary.write(8, 0, "Свободно (с учетом целей и конвертов)", fmt_h2)
         ws_summary.write_number(8, 1, float(free_net), fmt_money if free_net >= 0 else fmt_money_red)
 
         ws_summary.write(10, 0, "Как читать этот отчет", fmt_h2)
         ws_summary.write(
             11,
             0,
-            "• Сальдо дня (с учетом целей) = Доходы − Расходы − Отложено в цели (за день).\n"
+            "• Сальдо дня = Доходы − Расходы − отложено в цели и конверты (за день).\n"
             "• Накопленное сальдо = сумма «Сальдо дня» с начала месяца (стартуем с 0).\n"
             "  Это НЕ «баланс банковского счета», а динамика «свободно для трат» за месяц.\n"
-            "• «Отложено в цели» — резервирование денег. Это не расход, но уменьшает «свободно».",
+            "• Цель копит к сумме: на листе «Цели» прогресс не падает от покупок.\n"
+            "• Конверт — кучка без процента. Лист «Конверты»: внесено, потрачено, остаток.\n"
+            "• Покупка из цели или конверта есть и в расходах, и как «Покупка» в операциях.",
             fmt_note,
         )
 
@@ -280,8 +273,8 @@ class ReportExportService:
         ws_cf.write(0, 0, "Дата", fmt_header)
         ws_cf.write(0, 1, "Доходы", fmt_header)
         ws_cf.write(0, 2, "Расходы", fmt_header)
-        ws_cf.write(0, 3, "Отложено в цели (net)", fmt_header)
-        ws_cf.write(0, 4, "Сальдо дня (с учетом целей)", fmt_header)
+        ws_cf.write(0, 3, "Отложено в цели и конверты (net)", fmt_header)
+        ws_cf.write(0, 4, "Сальдо дня (с учетом резерва)", fmt_header)
         ws_cf.write(0, 5, "Накопленное сальдо", fmt_header)
 
         # полный диапазон дней месяца
@@ -318,39 +311,59 @@ class ReportExportService:
         chart_balance.set_y_axis({"name": "₽"})
         ws_summary.insert_chart("D4", chart_balance, {"x_scale": 1.2, "y_scale": 1.2})
 
+        def _shown(goal: Goal) -> bool:
+            parts = goal_parts.get(int(goal.id))
+            moved = bool(
+                parts and (parts.deposited or parts.withdrawn or parts.spent)
+            )
+            return goal.status == Goal.ACTIVE or moved
+
+        status_label = {
+            Goal.ACTIVE: "активна",
+            Goal.ARCHIVED: "в архиве",
+            Goal.PAUSED: "пауза",
+            Goal.COMPLETED: "завершена",
+            Goal.CANCELLED: "отменена",
+        }
+        fmt_pct = workbook.add_format({"num_format": "0.0"})
+
         # ---- sheet: Цели ----
         ws_goals = workbook.add_worksheet("Цели")
         ws_goals.freeze_panes(1, 0)
         ws_goals.set_column("A:A", 28)
         ws_goals.set_column("B:B", 14)
-        ws_goals.set_column("C:E", 16)
-        ws_goals.set_column("F:F", 12)
-        ws_goals.set_column("G:I", 18)
+        ws_goals.set_column("C:J", 18)
+        ws_goals.set_column("G:G", 14)
 
-        ws_goals.write(0, 0, "Цель", fmt_header)
-        ws_goals.write(0, 1, "Дедлайн", fmt_header)
-        ws_goals.write(0, 2, "Цель (₽)", fmt_header)
-        ws_goals.write(0, 3, "Накоплено (₽)", fmt_header)
-        ws_goals.write(0, 4, "Осталось (₽)", fmt_header)
-        ws_goals.write(0, 5, "Прогресс (%)", fmt_header)
-        ws_goals.write(0, 6, "План/мес (₽)", fmt_header)
-        ws_goals.write(0, 7, "Внесено в этом месяце (₽)", fmt_header)
-        ws_goals.write(0, 8, "Осталось внести в этом месяце (₽)", fmt_header)
+        for col, title in enumerate((
+            "Цель",
+            "Статус",
+            "Дедлайн",
+            "Цель (₽)",
+            "Накоплено (₽)",
+            "Потрачено (₽)",
+            "Сейчас лежит (₽)",
+            "Осталось накопить (₽)",
+            "Прогресс (%)",
+            "План/мес (₽)",
+            "Внесено в этом месяце (₽)",
+            "Осталось внести в этом месяце (₽)",
+        )):
+            ws_goals.write(0, col, title, fmt_header)
 
         # as_of: конец периода или сегодня (если это текущий месяц)
         as_of = min(timezone.localdate(), date.fromordinal(end_date.toordinal() - 1))
-        for i, g in enumerate(goals, start=1):
-            bal = goal_balances.get(int(g.id), Decimal("0"))
-            if bal < 0:
-                bal = Decimal("0")
-            target_amt = Decimal(g.target_amount)
-            remaining_amt = max(target_amt - bal, Decimal("0"))
-            pct = Decimal("0")
-            if target_amt > 0:
-                pct = (bal / target_amt) * Decimal("100")
+        savings = [g for g in goals if not g.is_envelope and _shown(g)]
+        for i, g in enumerate(savings, start=1):
+            parts = goal_parts.get(int(g.id)) or LedgerTotals(Decimal("0"), Decimal("0"), Decimal("0"))
+            committed = max(parts.committed, Decimal("0"))
+            lying = max(parts.balance, Decimal("0"))
+            target_amt = Decimal(g.target_amount or 0)
+            remaining_amt = max(target_amt - committed, Decimal("0"))
+            pct = (committed / target_amt) * Decimal("100") if target_amt > 0 else Decimal("0")
 
             plan_per_month = None
-            if g.deadline and g.deadline >= as_of:
+            if g.deadline and g.deadline >= as_of and g.status == Goal.ACTIVE:
                 months_remaining = (g.deadline.year - as_of.year) * 12 + (g.deadline.month - as_of.month) + 1
                 if months_remaining > 0:
                     plan_per_month = (remaining_amt / Decimal(months_remaining)).quantize(Decimal("0.01"))
@@ -361,38 +374,67 @@ class ReportExportService:
                 remaining_month = max(plan_per_month - deposited_month, Decimal("0"))
 
             ws_goals.write(i, 0, g.title)
+            ws_goals.write(i, 1, status_label.get(g.status, g.status))
             if g.deadline:
-                ws_goals.write_datetime(i, 1, datetime(g.deadline.year, g.deadline.month, g.deadline.day), fmt_date)
+                ws_goals.write_datetime(i, 2, datetime(g.deadline.year, g.deadline.month, g.deadline.day), fmt_date)
             else:
-                ws_goals.write(i, 1, "")
-            ws_goals.write_number(i, 2, float(target_amt), fmt_money)
-            ws_goals.write_number(i, 3, float(bal), fmt_money)
-            ws_goals.write_number(i, 4, float(remaining_amt), fmt_money)
-            ws_goals.write_number(i, 5, float(pct), workbook.add_format({"num_format": "0.0"}))
+                ws_goals.write(i, 2, "")
+            ws_goals.write_number(i, 3, float(target_amt), fmt_money)
+            ws_goals.write_number(i, 4, float(committed), fmt_money)
+            ws_goals.write_number(i, 5, float(parts.spent), fmt_money)
+            ws_goals.write_number(i, 6, float(lying), fmt_money)
+            ws_goals.write_number(i, 7, float(remaining_amt), fmt_money)
+            ws_goals.write_number(i, 8, float(pct), fmt_pct)
             if plan_per_month is not None:
-                ws_goals.write_number(i, 6, float(plan_per_month), fmt_money)
+                ws_goals.write_number(i, 9, float(plan_per_month), fmt_money)
             else:
-                ws_goals.write(i, 6, "")
-            ws_goals.write_number(i, 7, float(deposited_month), fmt_money)
+                ws_goals.write(i, 9, "")
+            ws_goals.write_number(i, 10, float(deposited_month), fmt_money)
             if remaining_month is not None:
-                ws_goals.write_number(i, 8, float(remaining_month), fmt_money)
+                ws_goals.write_number(i, 11, float(remaining_month), fmt_money)
             else:
-                ws_goals.write(i, 8, "")
+                ws_goals.write(i, 11, "")
+
+        # ---- sheet: Конверты ----
+        ws_env = workbook.add_worksheet("Конверты")
+        ws_env.freeze_panes(1, 0)
+        ws_env.set_column("A:A", 28)
+        ws_env.set_column("B:F", 18)
+        for col, title in enumerate((
+            "Конверт",
+            "Статус",
+            "Внесено (₽)",
+            "Потрачено (₽)",
+            "Снято (₽)",
+            "Остаток (₽)",
+        )):
+            ws_env.write(0, col, title, fmt_header)
+        envelopes = [g for g in goals if g.is_envelope and _shown(g)]
+        for i, g in enumerate(envelopes, start=1):
+            parts = goal_parts.get(int(g.id)) or LedgerTotals(Decimal("0"), Decimal("0"), Decimal("0"))
+            ws_env.write(i, 0, g.title)
+            ws_env.write(i, 1, status_label.get(g.status, g.status))
+            ws_env.write_number(i, 2, float(parts.deposited), fmt_money)
+            ws_env.write_number(i, 3, float(parts.spent), fmt_money)
+            ws_env.write_number(i, 4, float(parts.withdrawn), fmt_money)
+            ws_env.write_number(i, 5, float(max(parts.balance, Decimal("0"))), fmt_money)
 
         # ---- sheet: Операции целей ----
         ws_ops = workbook.add_worksheet("Операции целей")
         ws_ops.freeze_panes(1, 0)
         ws_ops.set_column("A:A", 12)
         ws_ops.set_column("B:B", 28)
-        ws_ops.set_column("C:C", 16)
+        ws_ops.set_column("C:C", 14)
         ws_ops.set_column("D:D", 16)
-        ws_ops.set_column("E:E", 50)
+        ws_ops.set_column("E:E", 16)
+        ws_ops.set_column("F:F", 50)
 
         ws_ops.write(0, 0, "Дата", fmt_header)
-        ws_ops.write(0, 1, "Цель", fmt_header)
-        ws_ops.write(0, 2, "Тип", fmt_header)
-        ws_ops.write(0, 3, "Сумма (₽)", fmt_header)
-        ws_ops.write(0, 4, "Комментарий", fmt_header)
+        ws_ops.write(0, 1, "Название", fmt_header)
+        ws_ops.write(0, 2, "Где", fmt_header)
+        ws_ops.write(0, 3, "Тип", fmt_header)
+        ws_ops.write(0, 4, "Сумма (₽)", fmt_header)
+        ws_ops.write(0, 5, "Комментарий", fmt_header)
 
         type_map = {
             GoalLedgerEntry.DEPOSIT: "Пополнение",
@@ -403,10 +445,14 @@ class ReportExportService:
             d = e.occurred_at.date()
             ws_ops.write_datetime(i, 0, datetime(d.year, d.month, d.day), fmt_date)
             ws_ops.write(i, 1, e.goal.title if e.goal else "")
-            ws_ops.write(i, 2, type_map.get(e.entry_type, e.entry_type))
+            where = ""
+            if e.goal is not None:
+                where = "конверт" if e.goal.is_envelope else "цель"
+            ws_ops.write(i, 2, where)
+            ws_ops.write(i, 3, type_map.get(e.entry_type, e.entry_type))
             amt = Decimal(e.amount)
-            ws_ops.write_number(i, 3, float(amt), fmt_money if amt >= 0 else fmt_money_red)
-            ws_ops.write(i, 4, e.comment or "")
+            ws_ops.write_number(i, 4, float(amt), fmt_money if amt >= 0 else fmt_money_red)
+            ws_ops.write(i, 5, e.comment or "")
 
         # ---- sheet: Категории ----
         ws_cat = workbook.add_worksheet("Категории")

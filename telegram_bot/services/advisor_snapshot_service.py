@@ -591,23 +591,38 @@ class AdvisorSnapshotService:
     ) -> list[dict[str, Any]]:
         from telegram_bot.services.goal_eta import build_goal_eta
 
+        from goals.ledger import ledger_totals
+
         goals = await goal_service.list_goals()
         free_funds = await goal_service.get_free_funds_for_month(today)
         rows: list[dict[str, Any]] = []
         for goal in goals:
             if goal.status != goal.ACTIVE:
                 continue
-            balance = await goal_service.get_goal_balance(goal.id)
-            target = Decimal(goal.target_amount)
+            totals = await sync_to_async(ledger_totals, thread_sensitive=True)(goal.id)
+            balance = max(totals.balance, Decimal('0'))
+            if goal.is_envelope:
+                rows.append({
+                    'title': goal.title,
+                    'kind': 'envelope',
+                    'target': None,
+                    'balance': _money(balance),
+                    'progress_percent': None,
+                    'deadline': None,
+                    'eta': None,
+                })
+                continue
+            target = Decimal(goal.target_amount or 0)
+            committed = max(totals.committed, Decimal('0'))
             progress = float(
-                (balance / target * 100).quantize(Decimal('0.1')),
+                (committed / target * 100).quantize(Decimal('0.1')),
             ) if target > 0 else 0.0
             month_metrics = await goal_service.get_goal_month_metrics(goal, today)
             monthly_nets = await goal_service.recent_complete_month_nets(goal, today)
             eta = build_goal_eta(
                 today=today,
                 target=target,
-                balance=max(balance, Decimal('0')),
+                balance=committed,
                 deadline=goal.deadline,
                 monthly_nets=monthly_nets,
                 deposited_this_month=month_metrics['deposits'],
@@ -615,8 +630,9 @@ class AdvisorSnapshotService:
             )
             rows.append({
                 'title': goal.title,
+                'kind': 'savings',
                 'target': _money(target),
-                'balance': _money(max(balance, Decimal('0'))),
+                'balance': _money(balance),
                 'progress_percent': progress,
                 'deadline': goal.deadline.isoformat() if goal.deadline else None,
                 'eta': eta.as_dict(),

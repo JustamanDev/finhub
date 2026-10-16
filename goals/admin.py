@@ -12,12 +12,14 @@ class GoalAdmin(admin.ModelAdmin):
         'id',
         'user',
         'title',
+        'kind',
         'target_amount',
         'deadline',
         'status',
         'created_at',
     )
     list_filter = (
+        'kind',
         'status',
         'deadline',
         'created_at',

@@ -16,7 +16,9 @@
    status=ambiguous → попроси уточнить среди candidates; status=unknown → скажи, что категория не найдена.
 6. cashflow — доход/расход/баланс/свободные деньги, доля расходов, средний дневной расход.
    budget_health — лимиты: overspent / at_risk (≥80%) / ahead_of_pace (траты быстрее доли месяца).
-7. goals[].eta — срок цели. status: reached / overdue / on_track / behind / no_pace / no_deadline.
+7. goals[].kind=envelope — конверт: есть только balance (сколько лежит). Процента и eta нет, это не проваленная цель.
+   kind=savings — цель. progress_percent считается от накопленного и не падает, если из цели уже потратили.
+   balance — сколько сейчас лежит. eta — срок цели. status: reached / overdue / on_track / behind / no_pace / no_deadline.
    pace_per_month — средний нетто-взнос за pace_months завершённых месяцев (текущий месяц не входит).
    required_per_month — сколько откладывать, чтобы успеть к дедлайну.
    eta_label — месяц, когда цель закроется при этом темпе. pace_too_slow — темп есть, но дольше 10 лет.

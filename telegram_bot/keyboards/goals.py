@@ -21,8 +21,20 @@ class GoalsKeyboard:
                 ],
                 [
                     InlineKeyboardButton(
-                        text="📋 Мои цели",
+                        text="📦 Создать конверт",
+                        callback_data="envelope_create",
+                    ),
+                ],
+                [
+                    InlineKeyboardButton(
+                        text="📋 Мои цели и конверты",
                         callback_data="goals_list",
+                    ),
+                ],
+                [
+                    InlineKeyboardButton(
+                        text="🗄 Архив",
+                        callback_data="goals_archive",
                     ),
                 ],
             ]
@@ -33,10 +45,11 @@ class GoalsKeyboard:
     def get_goals_list_keyboard(goals: list) -> InlineKeyboardMarkup:
         rows = []
         for g in goals:
+            icon = "📦" if g.is_envelope else "🎯"
             rows.append(
                 [
                     InlineKeyboardButton(
-                        text=f"🎯 {g.title}",
+                        text=f"{icon} {g.title}",
                         callback_data=f"goal_view_{g.id}",
                     )
                 ]
@@ -48,7 +61,13 @@ class GoalsKeyboard:
                         text="➕ Создать цель",
                         callback_data="goal_create",
                     )
-                ]
+                ],
+                [
+                    InlineKeyboardButton(
+                        text="📦 Создать конверт",
+                        callback_data="envelope_create",
+                    )
+                ],
             ]
         keyboard = InlineKeyboardMarkup(rows)
         return attach_persistent_navigation(keyboard, back_callback="goals_menu")
@@ -86,6 +105,10 @@ class GoalsKeyboard:
                         text="🕓 История",
                         callback_data=f"goal_history_{goal_id}",
                     ),
+                    InlineKeyboardButton(
+                        text="🗄 В архив",
+                        callback_data=f"goal_archive_{goal_id}",
+                    ),
                 ],
             ]
         )
@@ -93,16 +116,51 @@ class GoalsKeyboard:
         return attach_persistent_navigation(keyboard, back_callback="goals_list")
 
     @staticmethod
-    def get_goal_input_keyboard(cancel_callback: str) -> InlineKeyboardMarkup:
+    def get_goal_input_keyboard(
+        cancel_callback: str,
+        extra_row: list | None = None,
+    ) -> InlineKeyboardMarkup:
+        rows = []
+        if extra_row:
+            rows.append(extra_row)
+        rows.append(
+            [
+                InlineKeyboardButton(
+                    text="🔙 Отмена",
+                    callback_data=cancel_callback,
+                ),
+            ]
+        )
+        keyboard = InlineKeyboardMarkup(rows)
+        return attach_persistent_navigation(keyboard, back_callback=None)
+
+    @staticmethod
+    def get_archive_confirm_keyboard(goal_id: int) -> InlineKeyboardMarkup:
         keyboard = InlineKeyboardMarkup(
             [
                 [
                     InlineKeyboardButton(
-                        text="🔙 Отмена",
-                        callback_data=cancel_callback,
+                        text="✅ Убрать в архив",
+                        callback_data=f"goal_archive_yes_{goal_id}",
                     ),
                 ],
             ]
         )
-        return attach_persistent_navigation(keyboard, back_callback=None)
+        return attach_persistent_navigation(keyboard, back_callback=f"goal_view_{goal_id}")
+
+    @staticmethod
+    def get_archive_list_keyboard(goals: list) -> InlineKeyboardMarkup:
+        rows = []
+        for g in goals:
+            icon = "📦" if g.is_envelope else "🎯"
+            rows.append(
+                [
+                    InlineKeyboardButton(
+                        text=f"{icon} {g.title}",
+                        callback_data=f"goal_restore_{g.id}",
+                    )
+                ]
+            )
+        keyboard = InlineKeyboardMarkup(rows)
+        return attach_persistent_navigation(keyboard, back_callback="goals_menu")
 
