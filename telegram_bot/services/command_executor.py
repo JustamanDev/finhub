@@ -1184,8 +1184,16 @@ class CommandExecutor:
         )
         lines.extend(money_lines[1:])
         lines.append(f'Добавлено {transaction.date.strftime("%d.%m.%Y")}')
+        from telegram_bot.services.goal_spend import goal_spend_note
 
-        keyboard = ActionKeyboard.get_transaction_actions_keyboard(transaction.id)
+        note = await sync_to_async(goal_spend_note, thread_sensitive=True)(transaction.id)
+        if note:
+            lines.append(note.strip())
+
+        keyboard = ActionKeyboard.get_transaction_actions_keyboard(
+            transaction.id,
+            from_goal=transaction.amount < 0,
+        )
         await context.bot.send_message(
             chat_id=update.effective_chat.id,
             text='\n'.join(lines),

@@ -149,6 +149,25 @@ class CallbackHandler(BaseHandler):
                     context,
                     telegram_user,
                 )
+            elif query.data.startswith('tx_goal_use_'):
+                parts = query.data.split('_')
+                transaction_id = int(parts[3])
+                goal_id = int(parts[4])
+                await self._handle_tx_goal_pick(
+                    query,
+                    context,
+                    telegram_user,
+                    transaction_id,
+                    goal_id,
+                )
+            elif query.data.startswith('tx_goal_'):
+                transaction_id = int(query.data.rsplit('_', 1)[-1])
+                await self._handle_tx_goal_list(
+                    query,
+                    context,
+                    telegram_user,
+                    transaction_id,
+                )
             elif query.data.startswith('goal_view_'):
                 goal_id = int(query.data.split('_')[2])
                 await self._handle_goal_view(
@@ -625,6 +644,8 @@ class CallbackHandler(BaseHandler):
         """Отправляет подтверждение создания транзакции"""
         from transactions.formatting import format_transaction_amount
 
+        from telegram_bot.services.goal_spend import goal_spend_note
+
         money_lines = format_transaction_amount(transaction).splitlines()
         message = (
             f"✅ {money_lines[0]} → "
@@ -635,10 +656,12 @@ class CallbackHandler(BaseHandler):
                 else ""
             )
             + f"Добавлено {transaction.date.strftime('%d.%m.%Y')}"
+            + await sync_to_async(goal_spend_note, thread_sensitive=True)(transaction.id)
         )
         
         keyboard = ActionKeyboard.get_transaction_actions_keyboard(
-            transaction.id
+            transaction.id,
+            from_goal=transaction.amount < 0,
         )
         
         await safe_edit_message_text(query,
@@ -655,6 +678,73 @@ class CallbackHandler(BaseHandler):
             query.message.chat_id,
             breaches_of(transaction),
         )
+
+    async def _handle_tx_goal_list(
+        self,
+        query: CallbackQuery,
+        context: ContextTypes.DEFAULT_TYPE,
+        telegram_user,
+        transaction_id: int,
+    ) -> None:
+        """Список целей, из которых можно списать этот расход."""
+        from telegram_bot.services.goal_spend import list_goals_for_spend
+
+        user = await sync_to_async(lambda: telegram_user.user)()
+        goals = await sync_to_async(list_goals_for_spend, thread_sensitive=True)(user)
+        if not goals:
+            await query.answer('Активных целей нет.')
+            return
+        buttons = []
+        for goal, balance in goals:
+            label = f'{goal.title} · {balance:,.0f} ₽'
+            buttons.append([
+                InlineKeyboardButton(
+                    text=label[:60],
+                    callback_data=f'tx_goal_use_{transaction_id}_{goal.id}',
+                ),
+            ])
+        buttons.append([
+            InlineKeyboardButton(
+                text='🔙 К операции',
+                callback_data=f'transaction_actions_{transaction_id}',
+            ),
+        ])
+        await safe_edit_message_text(
+            query,
+            text='Из какой цели списать эту трату?',
+            reply_markup=InlineKeyboardMarkup(buttons),
+        )
+
+    async def _handle_tx_goal_pick(
+        self,
+        query: CallbackQuery,
+        context: ContextTypes.DEFAULT_TYPE,
+        telegram_user,
+        transaction_id: int,
+        goal_id: int,
+    ) -> None:
+        """Списывает расход с выбранной цели и обновляет карточку."""
+        from transactions.models import Transaction
+        from telegram_bot.services.goal_spend import spend_expense_from_goal
+
+        user = await sync_to_async(lambda: telegram_user.user)()
+        result = await sync_to_async(spend_expense_from_goal, thread_sensitive=True)(
+            user,
+            transaction_id,
+            goal_id,
+        )
+        if not result.ok:
+            await query.answer(result.message, show_alert=True)
+            return
+        transaction = await sync_to_async(
+            lambda: Transaction.objects.select_related('category').get(
+                id=transaction_id,
+                user=user,
+            ),
+            thread_sensitive=True,
+        )()
+        await self._send_transaction_confirmation(query, context, transaction)
+        await query.answer('Списано с цели')
     
     async def _handle_transaction_edit(
         self,
