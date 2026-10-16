@@ -53,6 +53,11 @@ def goal_spend_note(transaction_id: int) -> str:
     if entry is None:
         return ''
     remaining = goal_balance(entry.goal_id)
+    if entry.goal.is_envelope:
+        return (
+            f'\nИз конверта «{entry.goal.title}». '
+            f'На конверте осталось {remaining:,.0f} ₽.'
+        )
     return (
         f'\nИз цели «{entry.goal.title}». '
         f'На цели осталось {remaining:,.0f} ₽.'
@@ -92,10 +97,11 @@ def spend_expense_from_goal(
     )
     available = goal_balance(goal.id) + already_here
     if need > available:
+        place = 'конверте' if goal.is_envelope else 'цели'
         return GoalSpendResult(
             False,
             (
-                f'На цели «{goal.title}» {available:,.0f} ₽, '
+                f'На {place} «{goal.title}» {available:,.0f} ₽, '
                 f'для этой траты нужно {need:,.0f} ₽.'
             ),
         )
@@ -125,8 +131,9 @@ def ensure_spend_fits(transaction: Transaction, new_abs_amount: Decimal) -> None
         return
     available = goal_balance(entry.goal_id) + abs(entry.amount)
     if new_abs_amount > available:
+        place = 'конверте' if entry.goal.is_envelope else 'цели'
         raise GoalSpendShortfall(
-            f'На цели «{entry.goal.title}» {available:,.0f} ₽, '
+            f'На {place} «{entry.goal.title}» {available:,.0f} ₽, '
             f'нужно {new_abs_amount:,.0f} ₽.',
         )
 

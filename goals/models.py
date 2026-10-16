@@ -15,12 +15,22 @@ class Goal(TimestampedModel):
     PAUSED = 'paused'
     COMPLETED = 'completed'
     CANCELLED = 'cancelled'
+    ARCHIVED = 'archived'
 
     STATUS_CHOICES = [
         (ACTIVE, 'Активна'),
         (PAUSED, 'Пауза'),
         (COMPLETED, 'Завершена'),
         (CANCELLED, 'Отменена'),
+        (ARCHIVED, 'В архиве'),
+    ]
+
+    SAVINGS = 'savings'
+    ENVELOPE = 'envelope'
+
+    KIND_CHOICES = [
+        (SAVINGS, 'Цель'),
+        (ENVELOPE, 'Конверт'),
     ]
 
     user = models.ForeignKey(
@@ -29,8 +39,20 @@ class Goal(TimestampedModel):
         related_name='goals',
         verbose_name='Пользователь',
     )
-    title = models.CharField('Название цели', max_length=120)
-    target_amount = models.DecimalField('Целевая сумма', max_digits=14, decimal_places=2)
+    title = models.CharField('Название', max_length=120)
+    kind = models.CharField(
+        'Тип',
+        max_length=16,
+        choices=KIND_CHOICES,
+        default=SAVINGS,
+    )
+    target_amount = models.DecimalField(
+        'Целевая сумма',
+        max_digits=14,
+        decimal_places=2,
+        null=True,
+        blank=True,
+    )
     deadline = models.DateField('Дедлайн', null=True, blank=True)
     status = models.CharField(
         'Статус',
@@ -40,8 +62,8 @@ class Goal(TimestampedModel):
     )
 
     class Meta:
-        verbose_name = 'Цель'
-        verbose_name_plural = 'Цели'
+        verbose_name = 'Цель или конверт'
+        verbose_name_plural = 'Цели и конверты'
         ordering = [
             '-created_at',
         ]
@@ -54,6 +76,10 @@ class Goal(TimestampedModel):
                 name='unique_goal_title_per_user',
             ),
         ]
+
+    @property
+    def is_envelope(self) -> bool:
+        return self.kind == self.ENVELOPE
 
     def __str__(self) -> str:
         return f"{self.title} ({self.user_id})"

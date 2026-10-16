@@ -149,6 +149,48 @@ class CallbackHandler(BaseHandler):
                     context,
                     telegram_user,
                 )
+            elif query.data == 'envelope_create':
+                await self._handle_envelope_create_prompt(
+                    query,
+                    context,
+                    telegram_user,
+                )
+            elif query.data == 'envelope_skip_deposit':
+                await self._handle_envelope_skip_deposit(
+                    query,
+                    context,
+                    telegram_user,
+                )
+            elif query.data == 'goals_archive':
+                await self._handle_goals_archive(
+                    query,
+                    context,
+                    telegram_user,
+                )
+            elif query.data.startswith('goal_archive_yes_'):
+                goal_id = int(query.data.rsplit('_', 1)[-1])
+                await self._handle_goal_archive_yes(
+                    query,
+                    context,
+                    telegram_user,
+                    goal_id,
+                )
+            elif query.data.startswith('goal_restore_'):
+                goal_id = int(query.data.rsplit('_', 1)[-1])
+                await self._handle_goal_restore(
+                    query,
+                    context,
+                    telegram_user,
+                    goal_id,
+                )
+            elif query.data.startswith('goal_archive_'):
+                goal_id = int(query.data.rsplit('_', 1)[-1])
+                await self._handle_goal_archive_confirm(
+                    query,
+                    context,
+                    telegram_user,
+                    goal_id,
+                )
             elif query.data.startswith('tx_goal_use_'):
                 parts = query.data.split('_')
                 transaction_id = int(parts[3])
@@ -692,11 +734,12 @@ class CallbackHandler(BaseHandler):
         user = await sync_to_async(lambda: telegram_user.user)()
         goals = await sync_to_async(list_goals_for_spend, thread_sensitive=True)(user)
         if not goals:
-            await query.answer('Активных целей нет.')
+            await query.answer('Активных целей и конвертов нет.')
             return
         buttons = []
         for goal, balance in goals:
-            label = f'{goal.title} · {balance:,.0f} ₽'
+            icon = '📦' if goal.is_envelope else '🎯'
+            label = f'{icon} {goal.title} · {balance:,.0f} ₽'
             buttons.append([
                 InlineKeyboardButton(
                     text=label[:60],
@@ -711,7 +754,7 @@ class CallbackHandler(BaseHandler):
         ])
         await safe_edit_message_text(
             query,
-            text='Из какой цели списать эту трату?',
+            text='Откуда списать эту трату?',
             reply_markup=InlineKeyboardMarkup(buttons),
         )
 
@@ -1672,6 +1715,128 @@ class CallbackHandler(BaseHandler):
             parse_mode='Markdown',
         )
 
+    async def _handle_envelope_create_prompt(
+        self,
+        query: CallbackQuery,
+        context: ContextTypes.DEFAULT_TYPE,
+        telegram_user,
+    ) -> None:
+        from telegram_bot.keyboards.goals import GoalsKeyboard
+
+        context.user_data.pop('goal_creation_data', None)
+        context.user_data['goal_creation_step'] = 'title'
+        context.user_data['goal_creation_data'] = {'kind': 'envelope'}
+
+        keyboard = GoalsKeyboard.get_goal_input_keyboard(cancel_callback="goals_menu")
+        await safe_edit_message_text(
+            query,
+            text=(
+                "📦 **Создать конверт**\n\n"
+                "Конверт без целевой суммы и процента. "
+                "Потом сюда кладут деньги и из него списывают траты.\n\n"
+                "Введите название (например: Еда):"
+            ),
+            reply_markup=keyboard,
+            parse_mode='Markdown',
+        )
+
+    async def _handle_envelope_skip_deposit(
+        self,
+        query: CallbackQuery,
+        context: ContextTypes.DEFAULT_TYPE,
+        telegram_user,
+    ) -> None:
+        from asgiref.sync import sync_to_async
+        from telegram_bot.handlers.goals_handler import GoalsHandler
+        from telegram_bot.services.goal_service import GoalService, GoalTitleTaken
+
+        data = context.user_data.get('goal_creation_data') or {}
+        title = (data.get('title') or '').strip()
+        if context.user_data.get('goal_creation_step') != 'deposit' or not title:
+            await query.answer('Сначала введите название')
+            return
+        user = await sync_to_async(lambda: telegram_user.user)()
+        try:
+            goal = await GoalService(user).create_envelope(title)
+        except GoalTitleTaken as exc:
+            await query.answer(str(exc), show_alert=True)
+            return
+        context.user_data.pop('goal_creation_step', None)
+        context.user_data.pop('goal_creation_data', None)
+        await query.answer('Конверт создан')
+        await GoalsHandler().handle_goal_view(query, context, telegram_user, goal.id)
+
+    async def _handle_goals_archive(
+        self,
+        query: CallbackQuery,
+        context: ContextTypes.DEFAULT_TYPE,
+        telegram_user,
+    ) -> None:
+        from telegram_bot.handlers.goals_handler import GoalsHandler
+
+        for key in (
+            'goal_creation_step',
+            'goal_creation_data',
+            'goal_deposit_goal_id',
+            'goal_withdraw_goal_id',
+        ):
+            context.user_data.pop(key, None)
+        await GoalsHandler().handle_goals_archive(query, context, telegram_user)
+
+    async def _handle_goal_archive_confirm(
+        self,
+        query: CallbackQuery,
+        context: ContextTypes.DEFAULT_TYPE,
+        telegram_user,
+        goal_id: int,
+    ) -> None:
+        from telegram_bot.handlers.goals_handler import GoalsHandler
+
+        await GoalsHandler().handle_goal_archive_confirm(
+            query,
+            context,
+            telegram_user,
+            goal_id,
+        )
+
+    async def _handle_goal_archive_yes(
+        self,
+        query: CallbackQuery,
+        context: ContextTypes.DEFAULT_TYPE,
+        telegram_user,
+        goal_id: int,
+    ) -> None:
+        from asgiref.sync import sync_to_async
+        from telegram_bot.handlers.goals_handler import GoalsHandler
+        from telegram_bot.services.goal_service import GoalService
+
+        user = await sync_to_async(lambda: telegram_user.user)()
+        goal = await GoalService(user).archive_goal(goal_id)
+        if not goal:
+            await query.answer('Не найдено')
+            return
+        await query.answer('В архиве')
+        await GoalsHandler().handle_goals_list(query, context, telegram_user)
+
+    async def _handle_goal_restore(
+        self,
+        query: CallbackQuery,
+        context: ContextTypes.DEFAULT_TYPE,
+        telegram_user,
+        goal_id: int,
+    ) -> None:
+        from asgiref.sync import sync_to_async
+        from telegram_bot.handlers.goals_handler import GoalsHandler
+        from telegram_bot.services.goal_service import GoalService
+
+        user = await sync_to_async(lambda: telegram_user.user)()
+        goal = await GoalService(user).restore_goal(goal_id)
+        if not goal:
+            await query.answer('Не найдено')
+            return
+        await query.answer('Вернул')
+        await GoalsHandler().handle_goal_view(query, context, telegram_user, goal.id)
+
     async def _handle_goal_deposit_prompt(
         self,
         query: CallbackQuery,
@@ -1681,10 +1846,16 @@ class CallbackHandler(BaseHandler):
     ) -> None:
         from telegram_bot.keyboards.goals import GoalsKeyboard
 
+        from asgiref.sync import sync_to_async
+        from telegram_bot.services.goal_service import GoalService
+
         context.user_data['goal_deposit_goal_id'] = goal_id
+        user = await sync_to_async(lambda: telegram_user.user)()
+        goal = await GoalService(user).get_goal(goal_id)
+        name = 'конверт' if goal and goal.is_envelope else 'цель'
         keyboard = GoalsKeyboard.get_goal_input_keyboard(cancel_callback=f"goal_view_{goal_id}")
         await safe_edit_message_text(query,
-            text="➕ **Внести в цель**\n\nВведите сумму (например: 5000 или 499.90):",
+            text=f"➕ **Внести в {name}**\n\nВведите сумму (например: 5000 или 499.90):",
             reply_markup=keyboard,
             parse_mode='Markdown',
         )
@@ -1698,10 +1869,16 @@ class CallbackHandler(BaseHandler):
     ) -> None:
         from telegram_bot.keyboards.goals import GoalsKeyboard
 
+        from asgiref.sync import sync_to_async
+        from telegram_bot.services.goal_service import GoalService
+
         context.user_data['goal_withdraw_goal_id'] = goal_id
+        user = await sync_to_async(lambda: telegram_user.user)()
+        goal = await GoalService(user).get_goal(goal_id)
+        name = 'конверта' if goal and goal.is_envelope else 'цели'
         keyboard = GoalsKeyboard.get_goal_input_keyboard(cancel_callback=f"goal_view_{goal_id}")
         await safe_edit_message_text(query,
-            text="↩️ **Снять из цели**\n\nВведите сумму, которую хотите снять:",
+            text=f"↩️ **Снять из {name}**\n\nВведите сумму, которую хотите снять:",
             reply_markup=keyboard,
             parse_mode='Markdown',
         )

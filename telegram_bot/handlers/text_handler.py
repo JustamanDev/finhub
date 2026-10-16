@@ -11,7 +11,7 @@ from telegram_bot.services.command_executor import CommandExecutor
 from telegram_bot.services.goal_spend import GoalSpendShortfall
 from telegram_bot.services.transaction_service import TransactionService
 from telegram_bot.services.category_management_service import CategoryManagementService
-from telegram_bot.services.goal_service import GoalService
+from telegram_bot.services.goal_service import GoalService, GoalTitleTaken
 from telegram_bot.voice.interpreter import voice_text_parse_candidates
 from budgets.models import Budget
 from categories.models import Category
@@ -70,6 +70,25 @@ class TextHandler(BaseHandler):
 
             data['title'] = text
             context.user_data['goal_creation_data'] = data
+            if data.get('kind') == 'envelope':
+                from telegram import InlineKeyboardButton
+
+                context.user_data['goal_creation_step'] = 'deposit'
+                await update.message.reply_text(
+                    "Сколько положить в конверт сейчас?\n\n"
+                    "Напишите сумму или нажмите «Пока пустой».",
+                    reply_markup=GoalsKeyboard.get_goal_input_keyboard(
+                        cancel_callback="goals_menu",
+                        extra_row=[
+                            InlineKeyboardButton(
+                                text="Пока пустой",
+                                callback_data="envelope_skip_deposit",
+                            ),
+                        ],
+                    ),
+                )
+                return
+
             context.user_data['goal_creation_step'] = 'amount'
 
             await update.message.reply_text(
@@ -77,6 +96,30 @@ class TextHandler(BaseHandler):
                 reply_markup=GoalsKeyboard.get_goal_input_keyboard(cancel_callback="goals_menu"),
                 parse_mode='Markdown',
             )
+            return
+
+        if step == 'deposit':
+            lowered = text.lower()
+            if lowered in {'пусто', 'пустой', 'пока пустой', '0', 'пропустить'}:
+                amount = Decimal('0')
+            else:
+                try:
+                    amount = self._parse_money(text)
+                except (InvalidOperation, ValueError):
+                    await update.message.reply_text(
+                        "❌ Неверная сумма. Пример: **10000** или кнопка «Пока пустой».",
+                        reply_markup=GoalsKeyboard.get_goal_input_keyboard(cancel_callback="goals_menu"),
+                        parse_mode='Markdown',
+                    )
+                    return
+                if amount < 0:
+                    await update.message.reply_text(
+                        "❌ Сумма не может быть отрицательной.",
+                        reply_markup=GoalsKeyboard.get_goal_input_keyboard(cancel_callback="goals_menu"),
+                        parse_mode='Markdown',
+                    )
+                    return
+            await self._finish_envelope(update, context, telegram_user, data.get('title'), amount)
             return
 
         if step == 'amount':
@@ -151,6 +194,15 @@ class TextHandler(BaseHandler):
                     target_amount=target_amount,
                     deadline=deadline,
                 )
+            except GoalTitleTaken as exc:
+                context.user_data['goal_creation_step'] = 'title'
+                context.user_data['goal_creation_data'] = {'kind': 'savings'}
+                await update.message.reply_text(
+                    f"❌ {exc}\n\nВведите другое название:",
+                    reply_markup=GoalsKeyboard.get_goal_input_keyboard(cancel_callback="goals_menu"),
+                    parse_mode='Markdown',
+                )
+                return
             except IntegrityError:
                 # цель с таким названием уже есть
                 context.user_data['goal_creation_step'] = 'title'
@@ -190,6 +242,42 @@ class TextHandler(BaseHandler):
             reply_markup=GoalsKeyboard.get_goal_input_keyboard(cancel_callback="goals_menu"),
             parse_mode='Markdown',
         )
+
+    async def _finish_envelope(
+        self,
+        update: Update,
+        context: ContextTypes.DEFAULT_TYPE,
+        telegram_user,
+        title: str,
+        amount: Decimal,
+    ) -> None:
+        from telegram_bot.handlers.goals_handler import GoalsHandler
+        from telegram_bot.keyboards.goals import GoalsKeyboard
+
+        title = (title or '').strip()
+        if len(title) < 2:
+            context.user_data['goal_creation_step'] = 'title'
+            context.user_data['goal_creation_data'] = {'kind': 'envelope'}
+            await update.message.reply_text(
+                "❌ Название потерялось. Введите его ещё раз.",
+                reply_markup=GoalsKeyboard.get_goal_input_keyboard(cancel_callback="goals_menu"),
+            )
+            return
+        user = await sync_to_async(lambda: telegram_user.user)()
+        try:
+            goal = await GoalService(user).create_envelope(title, amount)
+        except GoalTitleTaken as exc:
+            context.user_data['goal_creation_step'] = 'title'
+            context.user_data['goal_creation_data'] = {'kind': 'envelope'}
+            await update.message.reply_text(
+                f"❌ {exc}\n\nВведите другое название:",
+                reply_markup=GoalsKeyboard.get_goal_input_keyboard(cancel_callback="goals_menu"),
+            )
+            return
+        context.user_data.pop('goal_creation_step', None)
+        context.user_data.pop('goal_creation_data', None)
+        await update.message.reply_text("✅ Конверт создан.")
+        await GoalsHandler().handle_goal_view(update, context, telegram_user, goal.id)
 
     async def _handle_goal_deposit_input(
         self,
