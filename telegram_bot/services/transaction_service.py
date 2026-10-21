@@ -261,7 +261,9 @@ class TransactionService:
         Returns:
             Словарь со статистикой
         """
-        today = date.today()
+        from telegram_bot.services.weekly_digest import vietnam_today
+
+        today = vietnam_today()
         
         # Используем sync ORM в отдельном потоке через sync_to_async
         expenses_qs = Transaction.objects.filter(

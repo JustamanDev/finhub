@@ -39,6 +39,10 @@ _MONTHS_GENITIVE = (
     'января', 'февраля', 'марта', 'апреля', 'мая', 'июня',
     'июля', 'августа', 'сентября', 'октября', 'ноября', 'декабря',
 )
+_MONTHS_NOMINATIVE = (
+    'январь', 'февраль', 'март', 'апрель', 'май', 'июнь',
+    'июль', 'август', 'сентябрь', 'октябрь', 'ноябрь', 'декабрь',
+)
 
 
 @dataclass(frozen=True)
@@ -79,6 +83,10 @@ class WeeklyDigest:
     budget_rows: tuple[BudgetRow, ...]
     goal_rows: tuple[GoalRow, ...]
     currency: str = 'RUB'
+    scope: str = 'week'
+    month_name: str = ''
+    month_income: Decimal = Decimal('0')
+    month_expenses: Decimal = Decimal('0')
 
     @property
     def balance(self) -> Decimal:
@@ -87,6 +95,10 @@ class WeeklyDigest:
     @property
     def free_funds(self) -> Decimal:
         return self.income - self.expenses - self.allocations
+
+    @property
+    def month_left(self) -> Decimal:
+        return self.month_income - self.month_expenses
 
 
 def vietnam_today(now: datetime | None = None) -> date:
@@ -143,6 +155,20 @@ def period_label(start: date, end: date) -> str:
     )
 
 
+def month_bounds(year: int, month: int) -> tuple[date, date]:
+    """Первый и последний день календарного месяца."""
+    start = date(year, month, 1)
+    if month == 12:
+        next_month = date(year + 1, 1, 1)
+    else:
+        next_month = date(year, month + 1, 1)
+    return start, next_month - timedelta(days=1)
+
+
+def month_name(day: date) -> str:
+    return _MONTHS_NOMINATIVE[day.month - 1]
+
+
 def build_weekly_digest(
     user,
     start: date,
@@ -150,6 +176,7 @@ def build_weekly_digest(
     *,
     today: date,
     in_progress: bool,
+    scope: str = 'week',
 ) -> WeeklyDigest:
     """Собирает сводку. Вызывать из синхронного контекста (ORM)."""
     from transactions.currencies import base_for_user
@@ -160,6 +187,17 @@ def build_weekly_digest(
         end,
     )
     allocations = _goal_allocations(user, start, end)
+    if scope == 'week':
+        month_income, month_expenses, *_rest = _cashflow(
+            user,
+            date(today.year, today.month, 1),
+            today,
+        )
+        shown_month = month_name(today)
+    else:
+        month_income, month_expenses = income, expenses
+        shown_month = month_name(start)
+    currency = base_for_user(user)
     return WeeklyDigest(
         start=start,
         end=end,
@@ -172,9 +210,59 @@ def build_weekly_digest(
         expense_rest_amount=rest_amount,
         income_rows=income_rows,
         budget_rows=_budget_rows(user, start, end),
-        goal_rows=_goal_rows(user, today, base_for_user(user)),
-        currency=base_for_user(user),
+        goal_rows=_goal_rows(user, today, currency),
+        currency=currency,
+        scope=scope,
+        month_name=shown_month,
+        month_income=month_income,
+        month_expenses=month_expenses,
     )
+
+
+def build_month_digest(user, year: int, month: int, today: date) -> WeeklyDigest:
+    """Месяц в том же виде, что недельная статья. Текущий месяц — по сегодня."""
+    start, end = month_bounds(year, month)
+    in_progress = (today.year, today.month) == (year, month)
+    visible_end = min(end, today) if in_progress else end
+    return build_weekly_digest(
+        user,
+        start,
+        visible_end,
+        today=today,
+        in_progress=in_progress,
+        scope='month',
+    )
+
+
+def today_figures(user, today: date) -> tuple[Decimal, Decimal, Decimal, str]:
+    """Расход и доход за день и остаток месяца (доход минус расход)."""
+    income, expenses, *_rest = _cashflow(user, today, today)
+    month_income, month_expenses, *_rest = _cashflow(
+        user,
+        date(today.year, today.month, 1),
+        today,
+    )
+    return expenses, income, month_income - month_expenses, month_name(today)
+
+
+def format_today_message(
+    expenses: Decimal,
+    income: Decimal,
+    month_left: Decimal,
+    month_title: str,
+    currency: str,
+) -> str:
+    """Экран «сегодня»: что было сегодня и сколько осталось за месяц."""
+    lines = [
+        '📊 Сегодня',
+        '',
+        f'💸 Расходы: {format_rub(expenses, currency)}',
+    ]
+    if income > 0:
+        lines.append(f'💰 Доходы: {format_rub(income, currency)}')
+    lines.append('')
+    lines.append(f'За {month_title} осталось {format_rub(month_left, currency)}.')
+    return '\n'.join(lines)
 
 
 def already_sent(telegram_user: TelegramUser, week_start: date) -> bool:
@@ -197,30 +285,52 @@ def render_rich_html(digest: WeeklyDigest) -> str:
     """HTML для sendRichMessage: заголовки и таблицы."""
     from transactions.currencies import reports_phrase
 
-    title = period_label(digest.start, digest.end)
     where = reports_phrase(digest.currency)
-    if digest.in_progress:
-        heading = f'Эта неделя, {title}'
-        lead = f'Неделя ещё идёт. Цифры с понедельника по сегодня, всё в {where}.'
+    if digest.scope == 'month':
+        heading = f'{digest.month_name.capitalize()} {digest.start.year}'
+        if digest.in_progress:
+            lead = f'Месяц ещё идёт. Цифры с 1-го по сегодня, всё в {where}.'
+        else:
+            lead = f'Итог месяца. Всё в {where}.'
     else:
-        heading = f'Неделя {title}'
-        lead = f'Итог прошедшей недели. Всё в {where}.'
+        title = period_label(digest.start, digest.end)
+        if digest.in_progress:
+            heading = f'Эта неделя, {title}'
+            lead = f'Неделя ещё идёт. Цифры с понедельника по сегодня, всё в {where}.'
+        else:
+            heading = f'Неделя {title}'
+            lead = f'Итог прошедшей недели. Всё в {where}.'
+
+    movement = [
+        ('Доход', format_rub(digest.income, digest.currency), False),
+        ('Расход', format_rub(digest.expenses, digest.currency), False),
+    ]
+    if digest.scope == 'month':
+        movement.append(('Баланс', format_rub(digest.balance, digest.currency), True))
+    movement.extend([
+        ('В цели', format_rub(digest.allocations, digest.currency), False),
+        ('Свободно', format_rub(digest.free_funds, digest.currency), True),
+    ])
 
     parts = [
         f'<h1>{escape(heading)}</h1>',
         f'<p>{escape(lead)}</p>',
-        _rich_table(
-            'Движение денег',
-            ('Статья', 'Сумма'),
-            [
-                ('Доход', format_rub(digest.income, digest.currency), False),
-                ('Расход', format_rub(digest.expenses, digest.currency), False),
-                ('Баланс', format_rub(digest.balance, digest.currency), True),
-                ('В цели', format_rub(digest.allocations, digest.currency), False),
-                ('Свободно', format_rub(digest.free_funds, digest.currency), True),
-            ],
-        ),
+        _rich_table('Движение денег', ('Статья', 'Сумма'), movement),
     ]
+    if digest.scope == 'week':
+        parts.append(
+            '<p>'
+            f'За {escape(digest.month_name)} осталось '
+            f'<b>{escape(format_rub(digest.month_left, digest.currency))}</b>: '
+            f'доход {escape(format_rub(digest.month_income, digest.currency))}, '
+            f'расход {escape(format_rub(digest.month_expenses, digest.currency))}.'
+            '</p>'
+        )
+    spent_empty = (
+        'За этот месяц расходов не было.'
+        if digest.scope == 'month'
+        else 'За эту неделю расходов не было.'
+    )
     parts.append('<h2>Куда ушли деньги</h2>')
     if digest.expense_rows:
         rows = [
@@ -235,7 +345,7 @@ def render_rich_html(digest: WeeklyDigest) -> str:
             ))
         parts.append(_rich_table('Расходы по категориям', ('Категория', 'Сумма'), rows))
     else:
-        parts.append('<p>За эту неделю расходов не было.</p>')
+        parts.append(f'<p>{escape(spent_empty)}</p>')
 
     if digest.income_rows:
         parts.append('<h2>Откуда пришли деньги</h2>')
@@ -247,9 +357,12 @@ def render_rich_html(digest: WeeklyDigest) -> str:
 
     parts.append('<h2>Лимиты</h2>')
     if digest.budget_rows:
-        parts.append(
-            '<p>Факт посчитан за весь срок лимита, не только за эту неделю.</p>',
+        limit_note = (
+            'Факт за весь срок лимита.'
+            if digest.scope == 'month'
+            else 'Факт посчитан за весь срок лимита, не только за эту неделю.'
         )
+        parts.append(f'<p>{escape(limit_note)}</p>')
         parts.append(_rich_table(
             'Лимиты',
             ('Категория', 'Факт', 'Лимит', 'Осталось'),
@@ -264,7 +377,12 @@ def render_rich_html(digest: WeeklyDigest) -> str:
             ],
         ))
     else:
-        parts.append('<p>Активных лимитов на эту неделю нет.</p>')
+        empty_limits = (
+            'Активных лимитов на этот месяц нет.'
+            if digest.scope == 'month'
+            else 'Активных лимитов на эту неделю нет.'
+        )
+        parts.append(f'<p>{escape(empty_limits)}</p>')
 
     parts.append('<h2>Цели и конверты</h2>')
     if digest.goal_rows:
@@ -283,7 +401,9 @@ def render_rich_html(digest: WeeklyDigest) -> str:
     else:
         parts.append('<p>Активных целей и конвертов нет.</p>')
 
-    if digest.in_progress:
+    if digest.scope == 'month':
+        footer = 'Соседний месяц и Excel — кнопками под сообщением.'
+    elif digest.in_progress:
         footer = (
             'Итог прошедшей недели приходит в 9:00 по времени Вьетнама. '
             'Если бот в понедельник молчал, сводка придёт на следующее утро.'
@@ -296,19 +416,33 @@ def render_rich_html(digest: WeeklyDigest) -> str:
 
 def render_legacy_html(digest: WeeklyDigest) -> str:
     """Обычный HTML Telegram, если статья недоступна."""
-    title = period_label(digest.start, digest.end)
-    heading = f'Эта неделя, {title}' if digest.in_progress else f'Неделя {title}'
+    if digest.scope == 'month':
+        heading = f'{digest.month_name.capitalize()} {digest.start.year}'
+    else:
+        title = period_label(digest.start, digest.end)
+        heading = f'Эта неделя, {title}' if digest.in_progress else f'Неделя {title}'
     lines = [
         f'<b>{escape(heading)}</b>',
         '',
         f'Доход: <b>{escape(format_rub(digest.income, digest.currency))}</b>',
         f'Расход: <b>{escape(format_rub(digest.expenses, digest.currency))}</b>',
-        f'Баланс: <b>{escape(format_rub(digest.balance, digest.currency))}</b>',
+    ]
+    if digest.scope == 'month':
+        lines.append(
+            f'Баланс: <b>{escape(format_rub(digest.balance, digest.currency))}</b>',
+        )
+    lines.extend([
         f'В цели: {escape(format_rub(digest.allocations, digest.currency))}',
         f'Свободно: <b>{escape(format_rub(digest.free_funds, digest.currency))}</b>',
-        '',
-        '<b>Куда ушли деньги</b>',
-    ]
+    ])
+    if digest.scope == 'week':
+        lines.append(
+            f'За {escape(digest.month_name)} осталось '
+            f'<b>{escape(format_rub(digest.month_left, digest.currency))}</b>: '
+            f'доход {escape(format_rub(digest.month_income, digest.currency))}, '
+            f'расход {escape(format_rub(digest.month_expenses, digest.currency))}.'
+        )
+    lines.extend(['', '<b>Куда ушли деньги</b>'])
     if digest.expense_rows:
         for row in digest.expense_rows:
             lines.append(f'• {escape(row.label)} — {escape(format_rub(row.amount, digest.currency))}')
@@ -318,7 +452,11 @@ def render_legacy_html(digest: WeeklyDigest) -> str:
                 f'{escape(format_rub(digest.expense_rest_amount, digest.currency))}',
             )
     else:
-        lines.append('За эту неделю расходов не было.')
+        lines.append(
+            'За этот месяц расходов не было.'
+            if digest.scope == 'month'
+            else 'За эту неделю расходов не было.'
+        )
 
     if digest.income_rows:
         lines.append('')
@@ -337,7 +475,11 @@ def render_legacy_html(digest: WeeklyDigest) -> str:
                 f'осталось {escape(format_rub(row.remaining, digest.currency))}',
             )
     else:
-        lines.append('Активных лимитов на эту неделю нет.')
+        lines.append(
+            'Активных лимитов на этот месяц нет.'
+            if digest.scope == 'month'
+            else 'Активных лимитов на эту неделю нет.'
+        )
 
     lines.append('')
     lines.append('<b>Цели и конверты</b>')
@@ -351,48 +493,63 @@ def render_legacy_html(digest: WeeklyDigest) -> str:
     return '\n'.join(lines)
 
 
-async def send_weekly_digest(bot, chat_id: int, digest: WeeklyDigest) -> None:
-    """Шлёт статью. При ошибке API — обычное HTML-сообщение."""
-    from telegram_bot.keyboards.actions import ActionKeyboard
-
-    menu = ActionKeyboard.get_main_menu_keyboard()
+async def send_rich_article(
+    bot,
+    chat_id: int,
+    *,
+    html: str,
+    legacy_html: str,
+    reply_markup,
+    fallback_hint: str,
+) -> None:
+    """Статья с клавиатурой. Если API статьи недоступен — обычный HTML."""
     rich_message = {
-        'html': render_rich_html(digest),
+        'html': html,
         'skip_entity_detection': True,
     }
+    markup = reply_markup.to_dict() if reply_markup is not None else None
     try:
-        await bot.do_api_request(
-            'sendRichMessage',
-            api_kwargs={
-                'chat_id': chat_id,
-                'rich_message': rich_message,
-                'reply_markup': menu.to_dict(),
-            },
-        )
+        kwargs = {'chat_id': chat_id, 'rich_message': rich_message}
+        if markup is not None:
+            kwargs['reply_markup'] = markup
+        await bot.do_api_request('sendRichMessage', api_kwargs=kwargs)
         return
     except Exception:
         logger.exception('sendRichMessage с меню не прошёл, повторяю без клавиатуры')
     try:
         await bot.do_api_request(
             'sendRichMessage',
-            api_kwargs={
-                'chat_id': chat_id,
-                'rich_message': rich_message,
-            },
+            api_kwargs={'chat_id': chat_id, 'rich_message': rich_message},
         )
-        await bot.send_message(
-            chat_id=chat_id,
-            text='Главное меню:',
-            reply_markup=menu,
-        )
+        if reply_markup is not None:
+            await bot.send_message(
+                chat_id=chat_id,
+                text=fallback_hint,
+                reply_markup=reply_markup,
+            )
     except Exception:
         logger.exception('sendRichMessage не прошёл, отправляю обычный HTML')
         await bot.send_message(
             chat_id=chat_id,
-            text=render_legacy_html(digest),
+            text=legacy_html,
             parse_mode='HTML',
-            reply_markup=menu,
+            reply_markup=reply_markup,
         )
+
+
+async def send_weekly_digest(bot, chat_id: int, digest: WeeklyDigest) -> None:
+    """Шлёт недельную статью. При ошибке API — обычное HTML-сообщение."""
+    from telegram_bot.keyboards.actions import ActionKeyboard
+
+    menu = ActionKeyboard.get_main_menu_keyboard()
+    await send_rich_article(
+        bot,
+        chat_id,
+        html=render_rich_html(digest),
+        legacy_html=render_legacy_html(digest),
+        reply_markup=menu,
+        fallback_hint='Главное меню:',
+    )
 
 
 async def push_current_week(bot, telegram_user: TelegramUser, chat_id: int) -> None:

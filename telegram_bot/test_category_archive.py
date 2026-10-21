@@ -10,9 +10,8 @@ from django.utils import timezone
 
 from budgets.models import Budget
 from categories.models import Category
-from telegram_bot.handlers.report_handler import ReportHandler
 from telegram_bot.services.category_management_service import CategoryManagementService
-from telegram_bot.services.report_service import ReportService
+from telegram_bot.services.weekly_digest import build_month_digest, render_rich_html
 from telegram_bot.voice.category_resolver import CategoryResolver, ResolveStatus
 from transactions.models import Transaction
 
@@ -88,15 +87,17 @@ class CategoryArchiveTests(TestCase):
     def test_report_shows_archived_spend_and_skips_empty_archive(self):
         async_to_sync(self.service.archive_category)(self.food.id)
         async_to_sync(self.service.archive_category)(self.empty.id)
-        report = async_to_sync(ReportService(self.user).get_monthly_report)(
+        digest = build_month_digest(
+            self.user,
             self.today.year,
             self.today.month,
+            self.today,
         )
-        text = ReportHandler()._format_report_message(report)
+        text = render_rich_html(digest)
         self.assertIn('Кафе', text)
-        self.assertIn('1,800', text)
+        self.assertIn('1 800', text)
         self.assertNotIn('Старый абонемент', text)
-        self.assertEqual(report['total_expenses'], Decimal('1800'))
+        self.assertEqual(digest.expenses, Decimal('1800'))
 
     def test_restore_and_recreate_by_same_name(self):
         async_to_sync(self.service.archive_category)(self.food.id)

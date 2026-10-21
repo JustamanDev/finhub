@@ -1032,27 +1032,24 @@ class CallbackHandler(BaseHandler):
         telegram_user,
     ) -> None:
         """Обрабатывает кнопку 'Статистика'"""
-        from telegram_bot.services.transaction_service import TransactionService
-        
         user = await sync_to_async(lambda: telegram_user.user)()
-        transaction_service = TransactionService(user)
-        stats = await transaction_service.get_today_statistics()
-        from transactions.currencies import base_currency_of, symbol_of
-
-        sym = symbol_of(base_currency_of(telegram_user))
-        stats_text = (
-            f"📊 Статистика за сегодня:\n\n"
-            f"💸 Расходы: {stats['expenses']:,.0f}{sym}\n"
-            f"💰 Доходы: {stats['income']:,.0f}{sym}\n"
-            f"💵 Баланс: {stats['balance']:,.0f}{sym}\n\n"
+        from telegram_bot.services.weekly_digest import (
+            format_today_message,
+            today_figures,
+            vietnam_today,
         )
-        
-        if stats['balance'] > 0:
-            stats_text += "✅ Сегодня в плюсе!"
-        elif stats['balance'] < 0:
-            stats_text += "⚠️ Сегодня трат больше доходов"
-        else:
-            stats_text += "⚖️ Доходы равны расходам"
+        from transactions.currencies import base_currency_of
+
+        expenses, income, month_left, month_title = await sync_to_async(
+            today_figures,
+        )(user, vietnam_today())
+        stats_text = format_today_message(
+            expenses,
+            income,
+            month_left,
+            month_title,
+            base_currency_of(telegram_user),
+        )
         
         from telegram_bot.keyboards.actions import ActionKeyboard
         keyboard = ActionKeyboard.get_main_menu_keyboard()
@@ -2026,17 +2023,17 @@ class CallbackHandler(BaseHandler):
         telegram_user,
     ) -> None:
         """Экспорт Excel за текущий месяц"""
-        from datetime import datetime
         from telegram_bot.handlers.report_handler import ReportHandler
+        from telegram_bot.services.weekly_digest import vietnam_today
 
-        now = datetime.now()
+        today = vietnam_today()
         report_handler = ReportHandler()
         await report_handler.handle_export_excel_month(
             query,
             context,
             telegram_user,
-            now.year,
-            now.month,
+            today.year,
+            today.month,
         )
 
     async def _handle_report_export_excel_period(
