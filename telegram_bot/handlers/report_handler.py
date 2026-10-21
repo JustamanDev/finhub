@@ -1,5 +1,4 @@
 import logging
-from datetime import datetime
 import io
 from telegram import Update, CallbackQuery
 from telegram.ext import ContextTypes
@@ -16,6 +15,16 @@ from telegram_bot.utils.telegram_resilience import (
 )
 
 logger = logging.getLogger(__name__)
+
+
+def _chat_id(update: Update | CallbackQuery) -> int | None:
+    message = getattr(update, 'message', None)
+    if message is not None and getattr(message, 'chat_id', None):
+        return message.chat_id
+    chat = getattr(update, 'effective_chat', None)
+    if chat is not None:
+        return chat.id
+    return None
 
 
 class ReportHandler(BaseHandler):
@@ -52,13 +61,15 @@ class ReportHandler(BaseHandler):
         telegram_user,
     ) -> None:
         """Показывает отчет за текущий месяц"""
-        now = datetime.now()
+        from telegram_bot.services.weekly_digest import vietnam_today
+
+        today = vietnam_today()
         await self._show_monthly_report(
             update,
             context,
             telegram_user,
-            now.year,
-            now.month,
+            today.year,
+            today.month,
         )
     
     async def handle_report_navigation(
@@ -141,100 +152,40 @@ class ReportHandler(BaseHandler):
         year: int,
         month: int,
     ) -> None:
-        """Показывает месячный отчет"""
-        user = await sync_to_async(lambda: telegram_user.user)()
-        report_service = ReportService(user)
-        
-        # Получаем отчет
-        report = await report_service.get_monthly_report(year, month)
-        
-        # Получаем доступные периоды для навигации
-        available_periods = await report_service.get_available_periods()
-        
-        # Формируем сообщение
-        from transactions.currencies import base_for_user
+        """Месяц отдельной статьёй: старое сообщение с меню не переписывается."""
+        from telegram_bot.services.weekly_digest import (
+            build_month_digest,
+            render_legacy_html,
+            render_rich_html,
+            send_rich_article,
+            vietnam_today,
+        )
 
-        currency = await sync_to_async(base_for_user)(user)
-        message = self._format_report_message(report, currency)
-        
-        # Создаем клавиатуру навигации
+        user = await sync_to_async(lambda: telegram_user.user)()
+        today = vietnam_today()
+        digest = await sync_to_async(build_month_digest)(user, year, month, today)
+        available_periods = await ReportService(user).get_available_periods()
         keyboard = ReportKeyboard.get_report_navigation_keyboard(
             current_period={'year': year, 'month': month},
             available_periods=available_periods,
         )
-        
-        await send_or_edit_message(
-            update,
-            context,
-            text=message,
+        chat_id = _chat_id(update)
+        if hasattr(update, 'answer'):
+            await update.answer()
+        if chat_id is None:
+            await send_or_edit_message(
+                update,
+                context,
+                text=render_legacy_html(digest),
+                reply_markup=keyboard,
+                parse_mode='HTML',
+            )
+            return
+        await send_rich_article(
+            context.bot,
+            chat_id,
+            html=render_rich_html(digest),
+            legacy_html=render_legacy_html(digest),
             reply_markup=keyboard,
-            parse_mode='Markdown',
-        )
-    
-    def _format_report_message(self, report: dict, currency: str = 'RUB') -> str:
-        """Форматирует сообщение отчета"""
-        from transactions.currencies import symbol_of
-
-        sym = symbol_of(currency)
-        message = f"📊 **Отчет за {report['period_name']}**\n\n"
-        
-        # Общая статистика
-        message += "💰 **Общая статистика:**\n"
-        message += f"• Доходы: {report['total_income']:,.0f}{sym}\n"
-        message += f"• Расходы: {report['total_expenses']:,.0f}{sym}\n"
-        message += f"• Баланс: {report['balance']:,.0f}{sym}\n\n"
-        
-        # Категории с остатками
-        message += "📋 **Категории:**\n"
-        
-        # Сортируем категории по типу и остатку
-        income_categories = []
-        expense_categories = []
-        
-        for category_name, stats in report['categories'].items():
-            category = stats['category']
-            # Безопасно получаем тип категории
-            category_type = getattr(category, 'type', 'expense')
-            
-            if (
-                not getattr(category, 'is_active', True)
-                and stats['income'] == 0
-                and stats['expense'] == 0
-            ):
-                continue
-            if category_type == 'income':
-                income_categories.append((category_name, stats))
-            else:
-                expense_categories.append((category_name, stats))
-        
-        # Доходы
-        if income_categories:
-            message += "\n💰 **Доходы:**\n"
-            for category_name, stats in sorted(income_categories):
-                emoji = getattr(stats['category'], 'icon', '💰')
-                message += (
-                    f"• {emoji} {category_name}: "
-                    f"{stats['income']:,.0f}{sym}"
-                )
-                # Показываем остаток только если он больше 0 (для доходов это не должно быть)
-                if stats['balance'] > 0:
-                    message += f" (остаток: {stats['balance']:,.0f}{sym})"
-                message += "\n"
-        
-        # Расходы
-        if expense_categories:
-            message += "\n💸 **Расходы:**\n"
-            for category_name, stats in sorted(expense_categories):
-                emoji = getattr(stats['category'], 'icon', '💸')
-                message += (
-                    f"• {emoji} {category_name}: "
-                    f"{stats['expense']:,.0f}{sym}"
-                )
-                # Показываем остаток только для категорий с бюджетом
-                if stats['balance'] > 0:
-                    message += f" (остаток: {stats['balance']:,.0f}{sym})"
-                elif stats['balance'] < 0:
-                    message += f" (превышен на {abs(stats['balance']):,.0f}{sym})"
-                message += "\n"
-        
-        return message 
+            fallback_hint='Листать месяц:',
+        ) 

@@ -15,10 +15,12 @@ from telegram_bot.models import TelegramUser
 from transactions.models import Transaction
 from telegram_bot.services.weekly_digest import (
     already_sent,
+    build_month_digest,
     build_weekly_digest,
     completed_week,
     current_week,
     format_rub,
+    format_today_message,
     mark_sent,
     period_label,
     render_legacy_html,
@@ -154,6 +156,9 @@ class WeeklyDigestBuildTests(TestCase):
         self.assertNotIn('Продукты <дом>', html)
         self.assertIn('50 000 ₽', html)
         self.assertIn('<h1>Неделя 5–11 октября</h1>', html)
+        self.assertIn('За октябрь осталось', html)
+        self.assertIn('55 000 ₽', html)
+        self.assertNotIn('Баланс', html)
         legacy = render_legacy_html(digest)
         self.assertNotIn('<table', legacy)
         self.assertIn('Продукты &lt;дом&gt;', legacy)
@@ -169,3 +174,41 @@ class WeeklyDigestBuildTests(TestCase):
     def test_format_rub_groups_thousands(self):
         self.assertEqual(format_rub(Decimal('12000')), '12 000 ₽')
         self.assertEqual(format_rub(Decimal('-1500.4')), '−1 500 ₽')
+
+    def test_a_new_transaction_lands_on_the_vietnam_day(self):
+        from unittest.mock import patch
+
+        from asgiref.sync import async_to_sync
+
+        from telegram_bot.services.transaction_service import TransactionService
+
+        with patch(
+            'telegram_bot.services.weekly_digest.vietnam_today',
+            return_value=date(2026, 10, 22),
+        ):
+            transaction = async_to_sync(
+                TransactionService(self.user).create_transaction,
+            )(Decimal('10'), self.food, 'expense')
+        self.assertEqual(transaction.date, date(2026, 10, 22))
+
+    def test_today_screen_skips_a_zero_income_and_shows_the_month(self):
+        text = format_today_message(
+            Decimal('1300'),
+            Decimal('0'),
+            Decimal('42000'),
+            'октябрь',
+            'RUB',
+        )
+        self.assertIn('Расходы: 1 300 ₽', text)
+        self.assertNotIn('Доходы', text)
+        self.assertNotIn('Баланс', text)
+        self.assertIn('За октябрь осталось 42 000 ₽.', text)
+
+    def test_month_article_keeps_the_month_balance(self):
+        digest = build_month_digest(self.user, 2026, 10, date(2026, 10, 14))
+        html = render_rich_html(digest)
+        self.assertIn('<h1>Октябрь 2026</h1>', html)
+        self.assertIn('Баланс', html)
+        self.assertIn('55 000 ₽', html)
+        self.assertIn('Продукты &lt;дом&gt;', html)
+        self.assertNotIn('За октябрь осталось', html)
