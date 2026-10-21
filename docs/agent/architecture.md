@@ -51,7 +51,7 @@ sequenceDiagram
 
 | Filter | Handler |
 |--------|---------|
-| `/start`, `/help`, `/stats` | `CommandHandler` |
+| `/start`, `/help`, `/stats`, `/week` | `CommandHandler` |
 | `TEXT & ~COMMAND` | `TextHandler.handle_text_message` |
 | all callbacks | `CallbackHandler.handle_callback_query` |
 | `VOICE \| AUDIO` | `VoiceHandler.handle_voice_message` |
@@ -70,17 +70,23 @@ telegram_bot/
 
 **Правило:** handlers вызывают services; не дублировать ORM-логику в handlers.
 
-## Planned: voice pipeline
+## Voice pipeline
+
+Голос уже работает, за флагом `VOICE_ENABLED`. Это не план.
+
+Вход — `telegram_bot/handlers/voice_handler.py`: скачивает аудио и зовёт Whisper. Разбор и маршрутизация — пакет `telegram_bot/voice/`: `transcription.py`, `interpreter.py` (сначала regex, если не разобрал — LLM JSON), `router.py`. Исполнение — `telegram_bot/services/command_executor.py`: записать операцию, поставить лимит, пополнить / снять / создать цель, ответить на вопрос консультанта.
+
+Если человек уже в текстовом мастере или в голосовом диалоге, транскрипт уходит в `TextHandler`, а не в интерпретатор заново.
 
 ```mermaid
 flowchart LR
-    V[Voice] --> W[Whisper API]
+    V[voice_handler] --> W[voice/transcription]
     W --> T[Transcript]
-    T --> R{Regex OK?}
-    R -->|yes| CE[CommandExecutor]
-    R -->|no| L[LLM JSON extract]
-    L --> CE
-    CE --> TS[TransactionService]
+    T --> D{Dialog or text wizard?}
+    D -->|yes| TH[TextHandler]
+    D -->|no| I[voice/interpreter]
+    I --> R[voice/router]
+    R --> CE[command_executor]
 ```
 
 Детали: [voice-input.md](voice-input.md)
@@ -105,9 +111,9 @@ flowchart LR
 
 ## Недельная сводка
 
-По понедельникам в 09:00 Asia/Ho_Chi_Minh бот сам шлёт итог прошедшей календарной недели (пн–вс). `/week` и кнопка «Неделя» показывают неделю, которая ещё идёт. Цифры в рублях: доход, расход, баланс, нетто в цели и конверты, свободно, категории, лимиты (факт за весь срок лимита). У цели в сводке тот же срок, что на карточке (`goal_eta`). У конверта только остаток, без процента и срока.
+Цикл `weekly_digest_loop` в `telegram_bot/services/weekly_digest.py` просыпается каждый день в 09:00 по Вьетнаму (Asia/Ho_Chi_Minh). Итог прошедшей календарной недели (пн–вс) уходит один раз: `already_sent` смотрит отметку в `UserState.context_data['weekly_digest_week']`. Если в понедельник бот не работал, сводка уйдёт на следующее утро в 09:00. `/week` и кнопка «Неделя» показывают неделю, которая ещё идёт. Цифры в рублях: доход, расход, баланс, нетто в цели и конверты, свободно, категории, лимиты (факт за весь срок лимита). У цели в сводке тот же срок, что на карточке (`goal_eta`). У конверта только остаток, без процента и срока.
 
-Сообщение — статья `sendRichMessage` с HTML-таблицами (`<table bordered striped>`). Вызов через `Bot.do_api_request`, потому что python-telegram-bot 22 метод не оборачивает. Если API отклоняет статью, уходит обычный HTML без таблиц. Повторно та же неделя не шлётся: отметка в `UserState.context_data['weekly_digest_week']`.
+Сообщение — статья `sendRichMessage` с HTML-таблицами (`<table bordered striped>`). Вызов через `Bot.do_api_request`, потому что python-telegram-bot 22 метод не оборачивает. Если API отклоняет статью, уходит обычный HTML без таблиц.
 
 ## Консультант и срок цели
 
