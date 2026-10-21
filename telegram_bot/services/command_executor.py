@@ -201,6 +201,10 @@ class CommandExecutor:
             voice_transcript=pending.get('voice_transcript'),
         )
 
+    async def _fallback_entry_currency(self, telegram_user) -> str:
+        """Валюта, если во фразе её не было: базовая, а не зашитые рубли."""
+        return await sync_to_async(base_currency_of)(telegram_user)
+
     async def _resolve_currency(
         self,
         telegram_user,
@@ -842,7 +846,10 @@ class CommandExecutor:
         user_state.current_amount = command.amount
         user_state.awaiting_category = True
         user_state.last_transaction_type = transaction_type
-        stash_entry_currency(user_state, command.currency or RUB)
+        stash_entry_currency(
+            user_state,
+            command.currency or await self._fallback_entry_currency(telegram_user),
+        )
         await user_state.asave()
 
         is_budget = command.intent == VoiceIntentType.SET_BUDGET
@@ -1026,7 +1033,9 @@ class CommandExecutor:
             'voice_create_after': True,
             'voice_intent': command.intent.value,
             'suggested_name': suggested,
-            'entry_currency': command.currency or RUB,
+            'entry_currency': (
+                command.currency or await self._fallback_entry_currency(telegram_user)
+            ),
         }
         await user_state.asave()
 

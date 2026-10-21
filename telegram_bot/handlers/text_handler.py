@@ -1159,7 +1159,11 @@ class TextHandler(BaseHandler):
             voice_create_after = bool(context_data.get('voice_create_after'))
             voice_intent = context_data.get('voice_intent') or ''
             pending_amount = user_state.current_amount
-            pending_currency = context_data.get('entry_currency') or 'RUB'
+            from transactions.currencies import base_currency_of
+
+            pending_currency = context_data.get('entry_currency') or (
+                await sync_to_async(base_currency_of)(telegram_user)
+            )
 
             # Сбрасываем состояние создания категории
             user_state.awaiting_category_creation = False
