@@ -56,12 +56,35 @@ finhub/settings/
 
 `docker-compose.yml`: `web`, `bot`, `db`, `redis`. Единый `.env` в корне.
 
-## API v1 (кратко)
+## API
 
-- `GET/POST /api/v1/categories/`
-- `GET/POST /api/v1/transactions/`
-- `GET/POST /api/v1/budgets/` (+ `current/`)
-- Auth: `/api/v1/auth/token/login/`
+Цели и конверты в REST нет. В `api/urls.py` зарегистрированы только `categories`, `transactions`, `budgets`. Модели `Goal` и `GoalLedgerEntry` в `goals/models.py` доступны из бота.
+
+Тот же роутер висит дважды: `/api/v1/...` и без версии, `/api/...`. `GET /api/` — карточка API (`api_info` в `finhub/urls.py`), не список ресурсов. Документация: `/api/docs/`, `/api/redoc/`, `/api/schema/` и те же пути под `/api/v1/`.
+
+Стандартный CRUD у всех трёх ViewSet (`ModelViewSet`): `GET` список, `POST` создание, `GET/PUT/PATCH/DELETE` по `{id}/`.
+
+Категории — `categories/views.py`:
+
+- `GET /api/v1/categories/income/` — активные доходы
+- `GET /api/v1/categories/expense/` — активные расходы
+- `GET /api/v1/categories/stats/` — счётчики категорий
+
+Транзакции — `transactions/views.py`:
+
+- `GET /api/v1/transactions/statistics/?period=month|week|year|all`
+- `GET /api/v1/transactions/recent/?limit=10`
+- `POST /api/v1/transactions/quick_add/`
+
+Бюджеты — `budgets/views.py`:
+
+- `GET /api/v1/budgets/current/` — активные на сегодня
+- `GET /api/v1/budgets/overspent/`
+- `POST /api/v1/budgets/quick_create/` — месячный бюджет
+- `GET /api/v1/budgets/categories_overview/`
+- `GET /api/v1/budgets/monthly_summary/?year=&month=`
+
+Auth (djoser, `api/urls.py`): `POST /api/v1/auth/token/login/`, `POST /api/v1/auth/token/logout/`, пользователи на `/api/v1/auth/users/`. Те же пути есть без `v1`.
 
 ## Telegram bot — handlers
 
