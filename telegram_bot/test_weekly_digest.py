@@ -175,6 +175,22 @@ class WeeklyDigestBuildTests(TestCase):
         self.assertEqual(format_rub(Decimal('12000')), '12 000 ₽')
         self.assertEqual(format_rub(Decimal('-1500.4')), '−1 500 ₽')
 
+    def test_a_new_transaction_lands_on_the_vietnam_day(self):
+        from unittest.mock import patch
+
+        from asgiref.sync import async_to_sync
+
+        from telegram_bot.services.transaction_service import TransactionService
+
+        with patch(
+            'telegram_bot.services.weekly_digest.vietnam_today',
+            return_value=date(2026, 10, 22),
+        ):
+            transaction = async_to_sync(
+                TransactionService(self.user).create_transaction,
+            )(Decimal('10'), self.food, 'expense')
+        self.assertEqual(transaction.date, date(2026, 10, 22))
+
     def test_today_screen_skips_a_zero_income_and_shows_the_month(self):
         text = format_today_message(
             Decimal('1300'),
