@@ -1,8 +1,8 @@
-"""Недельная сводка: цифры в рублях и статья Telegram с таблицами.
+"""Недельная сводка в базовой валюте пользователя и статья Telegram с таблицами.
 
 Неделя считается по календарю Вьетнама (Asia/Ho_Chi_Minh): с понедельника
-по воскресенье. По понедельникам в 09:00 бот сам присылает итог прошедшей
-недели. Команда /week показывает неделю, которая ещё идёт.
+по воскресенье. Цикл каждый день в 09:00 проверяет, не пора ли прислать итог
+прошедшей недели. Команда /week показывает неделю, которая ещё идёт.
 
 Статья уходит через sendRichMessage (Bot API: html с <table>). Если метод
 недоступен, то же содержание уходит обычным HTML без таблиц.
@@ -78,6 +78,7 @@ class WeeklyDigest:
     income_rows: tuple[MoneyRow, ...]
     budget_rows: tuple[BudgetRow, ...]
     goal_rows: tuple[GoalRow, ...]
+    currency: str = 'RUB'
 
     @property
     def balance(self) -> Decimal:
@@ -116,11 +117,14 @@ def seconds_until_next_send(now: datetime | None = None) -> float:
     return max((target - current).total_seconds(), 1.0)
 
 
-def format_rub(value: Decimal) -> str:
+def format_rub(value: Decimal, currency: str | None = None) -> str:
+    from transactions.currencies import RUB, symbol_of
+
+    code = currency or RUB
     whole = int(Decimal(value).quantize(Decimal('1'), rounding=ROUND_HALF_UP))
     sign = '−' if whole < 0 else ''
     grouped = f'{abs(whole):,}'.replace(',', ' ')
-    return f'{sign}{grouped} ₽'
+    return f'{sign}{grouped} {symbol_of(code)}'
 
 
 def period_label(start: date, end: date) -> str:
@@ -148,6 +152,8 @@ def build_weekly_digest(
     in_progress: bool,
 ) -> WeeklyDigest:
     """Собирает сводку. Вызывать из синхронного контекста (ORM)."""
+    from transactions.currencies import base_for_user
+
     income, expenses, expense_rows, income_rows, rest_count, rest_amount = _cashflow(
         user,
         start,
@@ -166,7 +172,8 @@ def build_weekly_digest(
         expense_rest_amount=rest_amount,
         income_rows=income_rows,
         budget_rows=_budget_rows(user, start, end),
-        goal_rows=_goal_rows(user, today),
+        goal_rows=_goal_rows(user, today, base_for_user(user)),
+        currency=base_for_user(user),
     )
 
 
@@ -188,13 +195,16 @@ def mark_sent(telegram_user: TelegramUser, week_start: date) -> None:
 
 def render_rich_html(digest: WeeklyDigest) -> str:
     """HTML для sendRichMessage: заголовки и таблицы."""
+    from transactions.currencies import reports_phrase
+
     title = period_label(digest.start, digest.end)
+    where = reports_phrase(digest.currency)
     if digest.in_progress:
         heading = f'Эта неделя, {title}'
-        lead = 'Неделя ещё идёт. Цифры с понедельника по сегодня, всё в рублях.'
+        lead = f'Неделя ещё идёт. Цифры с понедельника по сегодня, всё в {where}.'
     else:
         heading = f'Неделя {title}'
-        lead = 'Итог прошедшей недели. Всё в рублях.'
+        lead = f'Итог прошедшей недели. Всё в {where}.'
 
     parts = [
         f'<h1>{escape(heading)}</h1>',
@@ -203,24 +213,24 @@ def render_rich_html(digest: WeeklyDigest) -> str:
             'Движение денег',
             ('Статья', 'Сумма'),
             [
-                ('Доход', format_rub(digest.income), False),
-                ('Расход', format_rub(digest.expenses), False),
-                ('Баланс', format_rub(digest.balance), True),
-                ('В цели', format_rub(digest.allocations), False),
-                ('Свободно', format_rub(digest.free_funds), True),
+                ('Доход', format_rub(digest.income, digest.currency), False),
+                ('Расход', format_rub(digest.expenses, digest.currency), False),
+                ('Баланс', format_rub(digest.balance, digest.currency), True),
+                ('В цели', format_rub(digest.allocations, digest.currency), False),
+                ('Свободно', format_rub(digest.free_funds, digest.currency), True),
             ],
         ),
     ]
     parts.append('<h2>Куда ушли деньги</h2>')
     if digest.expense_rows:
         rows = [
-            (row.label, format_rub(row.amount), False)
+            (row.label, format_rub(row.amount, digest.currency), False)
             for row in digest.expense_rows
         ]
         if digest.expense_rest_count:
             rows.append((
                 f'Ещё {digest.expense_rest_count}',
-                format_rub(digest.expense_rest_amount),
+                format_rub(digest.expense_rest_amount, digest.currency),
                 False,
             ))
         parts.append(_rich_table('Расходы по категориям', ('Категория', 'Сумма'), rows))
@@ -232,7 +242,7 @@ def render_rich_html(digest: WeeklyDigest) -> str:
         parts.append(_rich_table(
             'Доходы по категориям',
             ('Категория', 'Сумма'),
-            [(row.label, format_rub(row.amount), False) for row in digest.income_rows],
+            [(row.label, format_rub(row.amount, digest.currency), False) for row in digest.income_rows],
         ))
 
     parts.append('<h2>Лимиты</h2>')
@@ -246,9 +256,9 @@ def render_rich_html(digest: WeeklyDigest) -> str:
             [
                 (
                     row.category,
-                    format_rub(row.spent),
-                    format_rub(row.limit),
-                    format_rub(row.remaining),
+                    format_rub(row.spent, digest.currency),
+                    format_rub(row.limit, digest.currency),
+                    format_rub(row.remaining, digest.currency),
                 )
                 for row in digest.budget_rows
             ],
@@ -264,7 +274,7 @@ def render_rich_html(digest: WeeklyDigest) -> str:
             [
                 (
                     row.title,
-                    _goal_collected(row),
+                    _goal_collected(row, digest.currency),
                     row.note,
                 )
                 for row in digest.goal_rows
@@ -275,8 +285,8 @@ def render_rich_html(digest: WeeklyDigest) -> str:
 
     if digest.in_progress:
         footer = (
-            'По понедельникам в 9:00 по времени Вьетнама приходит итог '
-            'прошедшей недели.'
+            'Итог прошедшей недели приходит в 9:00 по времени Вьетнама. '
+            'Если бот в понедельник молчал, сводка придёт на следующее утро.'
         )
     else:
         footer = 'Текущую неделю можно открыть командой /week или кнопкой «Неделя».'
@@ -291,21 +301,21 @@ def render_legacy_html(digest: WeeklyDigest) -> str:
     lines = [
         f'<b>{escape(heading)}</b>',
         '',
-        f'Доход: <b>{escape(format_rub(digest.income))}</b>',
-        f'Расход: <b>{escape(format_rub(digest.expenses))}</b>',
-        f'Баланс: <b>{escape(format_rub(digest.balance))}</b>',
-        f'В цели: {escape(format_rub(digest.allocations))}',
-        f'Свободно: <b>{escape(format_rub(digest.free_funds))}</b>',
+        f'Доход: <b>{escape(format_rub(digest.income, digest.currency))}</b>',
+        f'Расход: <b>{escape(format_rub(digest.expenses, digest.currency))}</b>',
+        f'Баланс: <b>{escape(format_rub(digest.balance, digest.currency))}</b>',
+        f'В цели: {escape(format_rub(digest.allocations, digest.currency))}',
+        f'Свободно: <b>{escape(format_rub(digest.free_funds, digest.currency))}</b>',
         '',
         '<b>Куда ушли деньги</b>',
     ]
     if digest.expense_rows:
         for row in digest.expense_rows:
-            lines.append(f'• {escape(row.label)} — {escape(format_rub(row.amount))}')
+            lines.append(f'• {escape(row.label)} — {escape(format_rub(row.amount, digest.currency))}')
         if digest.expense_rest_count:
             lines.append(
                 f'• Ещё {digest.expense_rest_count} — '
-                f'{escape(format_rub(digest.expense_rest_amount))}',
+                f'{escape(format_rub(digest.expense_rest_amount, digest.currency))}',
             )
     else:
         lines.append('За эту неделю расходов не было.')
@@ -314,7 +324,7 @@ def render_legacy_html(digest: WeeklyDigest) -> str:
         lines.append('')
         lines.append('<b>Откуда пришли деньги</b>')
         for row in digest.income_rows:
-            lines.append(f'• {escape(row.label)} — {escape(format_rub(row.amount))}')
+            lines.append(f'• {escape(row.label)} — {escape(format_rub(row.amount, digest.currency))}')
 
     lines.append('')
     lines.append('<b>Лимиты</b>')
@@ -322,9 +332,9 @@ def render_legacy_html(digest: WeeklyDigest) -> str:
         lines.append('Факт за весь срок лимита.')
         for row in digest.budget_rows:
             lines.append(
-                f'• {escape(row.category)}: {escape(format_rub(row.spent))} '
-                f'из {escape(format_rub(row.limit))}, '
-                f'осталось {escape(format_rub(row.remaining))}',
+                f'• {escape(row.category)}: {escape(format_rub(row.spent, digest.currency))} '
+                f'из {escape(format_rub(row.limit, digest.currency))}, '
+                f'осталось {escape(format_rub(row.remaining, digest.currency))}',
             )
     else:
         lines.append('Активных лимитов на эту неделю нет.')
@@ -334,7 +344,7 @@ def render_legacy_html(digest: WeeklyDigest) -> str:
     if digest.goal_rows:
         for row in digest.goal_rows:
             lines.append(
-                f'• {escape(row.title)}: {escape(_goal_collected(row))} — {escape(row.note)}',
+                f'• {escape(row.title)}: {escape(_goal_collected(row, digest.currency))} — {escape(row.note)}',
             )
     else:
         lines.append('Активных целей и конвертов нет.')
@@ -538,14 +548,14 @@ def _budget_rows(user, start: date, end: date) -> tuple[BudgetRow, ...]:
     return tuple(rows)
 
 
-def _goal_collected(row: GoalRow) -> str:
+def _goal_collected(row: GoalRow, currency: str = 'RUB') -> str:
     if row.kind == 'envelope':
-        return f'лежит {format_rub(row.balance)}'
+        return f'лежит {format_rub(row.balance, currency)}'
     target = row.target if row.target is not None else Decimal('0')
-    return f'{format_rub(row.balance)} / {format_rub(target)}'
+    return f'{format_rub(row.balance, currency)} / {format_rub(target, currency)}'
 
 
-def _goal_rows(user, today: date) -> tuple[GoalRow, ...]:
+def _goal_rows(user, today: date, currency: str = 'RUB') -> tuple[GoalRow, ...]:
     from goals.ledger import ledger_totals
 
     goals = Goal.objects.filter(user=user, status=Goal.ACTIVE).order_by('title')
@@ -579,12 +589,12 @@ def _goal_rows(user, today: date) -> tuple[GoalRow, ...]:
             title=goal.title,
             balance=committed,
             target=Decimal(goal.target_amount or 0),
-            note=_goal_note(eta),
+            note=_goal_note(eta, currency),
         ))
     return tuple(rows)
 
 
-def _goal_note(eta) -> str:
+def _goal_note(eta, currency: str = 'RUB') -> str:
     label = eta.as_dict().get('eta_label')
     if eta.status == 'reached':
         return 'собрана'
@@ -599,7 +609,7 @@ def _goal_note(eta) -> str:
     if eta.status == 'no_deadline':
         return 'без даты'
     if eta.required_per_month is not None:
-        return f'к сроку {format_rub(eta.required_per_month)}/мес'
+        return f'к сроку {format_rub(eta.required_per_month, currency)}/мес'
     return 'темп пока неясен'
 
 

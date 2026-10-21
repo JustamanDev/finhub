@@ -139,9 +139,11 @@ class CommandHandler(BaseHandler):
                 "• 500 кофе - расход на кофе, бот спросит валюту\n"
                 "• +2000 подработка - доход от подработки\n"
                 "• 1500 - выбрать категорию\n"
-                "• 50000д кофе - сразу в донгах\n"
-                "• 1500 руб такси - сразу в рублях\n\n"
-                "Отчёты всегда в рублях. Донги пересчитываются по курсу ЦБ.\n\n"
+                "• 50000д кофе - сразу в донгах, если донг есть в валютах ввода\n"
+                "• 1500 руб такси - сразу в рублях\n"
+                "• 20 usd кофе - сразу в долларах, если доллар включён\n\n"
+                "Отчёты, лимиты и цели — в базовой валюте из настроек. "
+                "По умолчанию это рубли. Другая валюта пересчитывается по курсу ЦБ.\n\n"
                 "⚡ Алиасы (настраиваются):\n"
                 "• п500 - продукты 500₽\n"
                 "• к200 - кофе 200₽\n"
@@ -217,12 +219,14 @@ class CommandHandler(BaseHandler):
             user = await sync_to_async(lambda: telegram_user.user)()
             transaction_service = TransactionService(user)
             stats = await transaction_service.get_today_statistics()
-            
+            from transactions.currencies import base_currency_of, symbol_of
+
+            sym = symbol_of(base_currency_of(telegram_user))
             stats_text = (
                 f"📊 Статистика за сегодня:\n\n"
-                f"💸 Расходы: {stats['expenses']:,.0f}₽\n"
-                f"💰 Доходы: {stats['income']:,.0f}₽\n"
-                f"💵 Баланс: {stats['balance']:,.0f}₽\n\n"
+                f"💸 Расходы: {stats['expenses']:,.0f}{sym}\n"
+                f"💰 Доходы: {stats['income']:,.0f}{sym}\n"
+                f"💵 Баланс: {stats['balance']:,.0f}{sym}\n\n"
             )
             
             if stats['balance'] > 0:

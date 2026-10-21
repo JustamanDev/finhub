@@ -78,7 +78,10 @@ class GoalsHandler(BaseHandler):
             return
 
         goal = data['goal']
-        lines = self._card_lines(data)
+        from transactions.currencies import base_currency_of
+
+        currency = await sync_to_async(base_currency_of)(telegram_user)
+        lines = self._card_lines(data, currency)
         quick_amount = None
         if goal.status != goal.ARCHIVED and not goal.is_envelope:
             recs = data['recommendations']
@@ -108,7 +111,10 @@ class GoalsHandler(BaseHandler):
         await self._send_or_edit_message(update, context, "\n".join(lines), keyboard)
 
     @staticmethod
-    def _card_lines(data: dict) -> list[str]:
+    def _card_lines(data: dict, currency: str = 'RUB') -> list[str]:
+        from transactions.currencies import symbol_of
+
+        sym = symbol_of(currency)
         goal = data['goal']
         balance = data['balance']
         free_funds = data['free_funds_this_month']
@@ -118,14 +124,14 @@ class GoalsHandler(BaseHandler):
             if goal.status == goal.ARCHIVED:
                 lines.append("В архиве. Новые траты из него списать нельзя.")
             lines.append("")
-            lines.append(f"На конверте лежит **{balance:,.0f} ₽**")
+            lines.append(f"На конверте лежит **{balance:,.0f} {sym}**")
             deposited = data['deposited_total']
             spent = data['spent']
             withdrawn = data['withdrawn_total']
             if deposited or spent or withdrawn:
                 lines.append(
-                    f"Внесено {deposited:,.0f} ₽, потрачено {spent:,.0f} ₽"
-                    + (f", снято {withdrawn:,.0f} ₽" if withdrawn else "")
+                    f"Внесено {deposited:,.0f} {sym}, потрачено {spent:,.0f} {sym}"
+                    + (f", снято {withdrawn:,.0f} {sym}" if withdrawn else "")
                 )
         else:
             target = data['target']
@@ -138,21 +144,21 @@ class GoalsHandler(BaseHandler):
                 lines.append(f"📅 Дедлайн: {goal.deadline.strftime('%d.%m.%Y')}")
             lines.append("")
             lines.append(
-                f"✅ Накоплено: **{data['committed']:,.0f} ₽** из **{target:,.0f} ₽** "
+                f"✅ Накоплено: **{data['committed']:,.0f} {sym}** из **{target:,.0f} {sym}** "
                 f"({progress_pct:.1f}%)"
             )
             if data['spent']:
-                lines.append(f"🛒 Потрачено из цели: **{data['spent']:,.0f} ₽**")
-                lines.append(f"Сейчас лежит: **{balance:,.0f} ₽**")
-            lines.append(f"⏳ Осталось накопить: **{remaining_total:,.0f} ₽**")
+                lines.append(f"🛒 Потрачено из цели: **{data['spent']:,.0f} {sym}**")
+                lines.append(f"Сейчас лежит: **{balance:,.0f} {sym}**")
+            lines.append(f"⏳ Осталось накопить: **{remaining_total:,.0f} {sym}**")
 
             planned_per_month = data['planned_per_month']
             if planned_per_month is not None:
                 lines.append("")
                 lines.append("📆 **План / факт (текущий месяц):**")
-                lines.append(f"• План: {planned_per_month:,.0f} ₽")
-                lines.append(f"• Внесено: {data['deposited_this_month']:,.0f} ₽")
-                lines.append(f"• Осталось внести: {data['remaining_this_month']:,.0f} ₽")
+                lines.append(f"• План: {planned_per_month:,.0f} {sym}")
+                lines.append(f"• Внесено: {data['deposited_this_month']:,.0f} {sym}")
+                lines.append(f"• Осталось внести: {data['remaining_this_month']:,.0f} {sym}")
 
             from telegram_bot.services.goal_eta import format_goal_eta_lines
 
@@ -163,7 +169,7 @@ class GoalsHandler(BaseHandler):
                     lines.extend(eta_lines)
 
         lines.append("")
-        lines.append(f"🧾 Свободно для трат в этом месяце: **{free_funds:,.0f} ₽**")
+        lines.append(f"🧾 Свободно для трат в этом месяце: **{free_funds:,.0f} {sym}**")
         return lines
 
     async def handle_goal_history(
@@ -185,6 +191,9 @@ class GoalsHandler(BaseHandler):
             )
             return
 
+        from transactions.currencies import base_currency_of, symbol_of
+
+        sym = symbol_of(await sync_to_async(base_currency_of)(telegram_user))
         entries = await service.get_recent_entries(goal_id, limit=20)
         message = f"🕓 **История: {goal.title}**\n\n"
         if not entries:
@@ -197,7 +206,7 @@ class GoalsHandler(BaseHandler):
                 else:
                     dt_str = str(dt)
                 sign = "➕" if e.amount >= 0 else "↩️"
-                message += f"{sign} {dt_str} — {abs(e.amount):,.0f} ₽"
+                message += f"{sign} {dt_str} — {abs(e.amount):,.0f} {sym}"
                 if e.comment:
                     message += f" — {e.comment}"
                 message += "\n"
@@ -257,6 +266,9 @@ class GoalsHandler(BaseHandler):
         if not goal:
             await self.handle_goals_list(update, context, telegram_user)
             return
+        from transactions.currencies import base_currency_of, symbol_of
+
+        sym = symbol_of(await sync_to_async(base_currency_of)(telegram_user))
         balance = await service.get_goal_balance(goal_id)
         name = "конверт" if goal.is_envelope else "цель"
         lines = [f"🗄 **Убрать {name} «{goal.title}» в архив?**", ""]
@@ -264,7 +276,7 @@ class GoalsHandler(BaseHandler):
         if balance > 0:
             lines.append("")
             lines.append(
-                f"Сейчас там лежит **{balance:,.0f} ₽**. "
+                f"Сейчас там лежит **{balance:,.0f} {sym}**. "
                 "В «свободно» эта сумма не вернётся. Чтобы вернуть деньги, сначала снимите их."
             )
         lines.append("")

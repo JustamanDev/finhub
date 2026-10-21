@@ -152,7 +152,10 @@ class ReportHandler(BaseHandler):
         available_periods = await report_service.get_available_periods()
         
         # Формируем сообщение
-        message = self._format_report_message(report)
+        from transactions.currencies import base_for_user
+
+        currency = await sync_to_async(base_for_user)(user)
+        message = self._format_report_message(report, currency)
         
         # Создаем клавиатуру навигации
         keyboard = ReportKeyboard.get_report_navigation_keyboard(
@@ -168,15 +171,18 @@ class ReportHandler(BaseHandler):
             parse_mode='Markdown',
         )
     
-    def _format_report_message(self, report: dict) -> str:
+    def _format_report_message(self, report: dict, currency: str = 'RUB') -> str:
         """Форматирует сообщение отчета"""
+        from transactions.currencies import symbol_of
+
+        sym = symbol_of(currency)
         message = f"📊 **Отчет за {report['period_name']}**\n\n"
         
         # Общая статистика
         message += "💰 **Общая статистика:**\n"
-        message += f"• Доходы: {report['total_income']:,.0f}₽\n"
-        message += f"• Расходы: {report['total_expenses']:,.0f}₽\n"
-        message += f"• Баланс: {report['balance']:,.0f}₽\n\n"
+        message += f"• Доходы: {report['total_income']:,.0f}{sym}\n"
+        message += f"• Расходы: {report['total_expenses']:,.0f}{sym}\n"
+        message += f"• Баланс: {report['balance']:,.0f}{sym}\n\n"
         
         # Категории с остатками
         message += "📋 **Категории:**\n"
@@ -208,11 +214,11 @@ class ReportHandler(BaseHandler):
                 emoji = getattr(stats['category'], 'icon', '💰')
                 message += (
                     f"• {emoji} {category_name}: "
-                    f"{stats['income']:,.0f}₽"
+                    f"{stats['income']:,.0f}{sym}"
                 )
                 # Показываем остаток только если он больше 0 (для доходов это не должно быть)
                 if stats['balance'] > 0:
-                    message += f" (остаток: {stats['balance']:,.0f}₽)"
+                    message += f" (остаток: {stats['balance']:,.0f}{sym})"
                 message += "\n"
         
         # Расходы
@@ -222,13 +228,13 @@ class ReportHandler(BaseHandler):
                 emoji = getattr(stats['category'], 'icon', '💸')
                 message += (
                     f"• {emoji} {category_name}: "
-                    f"{stats['expense']:,.0f}₽"
+                    f"{stats['expense']:,.0f}{sym}"
                 )
                 # Показываем остаток только для категорий с бюджетом
                 if stats['balance'] > 0:
-                    message += f" (остаток: {stats['balance']:,.0f}₽)"
+                    message += f" (остаток: {stats['balance']:,.0f}{sym})"
                 elif stats['balance'] < 0:
-                    message += f" (превышен на {abs(stats['balance']):,.0f}₽)"
+                    message += f" (превышен на {abs(stats['balance']):,.0f}{sym})"
                 message += "\n"
         
         return message 

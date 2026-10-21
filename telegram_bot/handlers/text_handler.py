@@ -14,6 +14,7 @@ from telegram_bot.services.category_management_service import CategoryManagement
 from telegram_bot.services.goal_service import GoalService, GoalTitleTaken
 from telegram_bot.voice.interpreter import voice_text_parse_candidates
 from budgets.models import Budget
+from transactions.currencies import base_currency_of
 from categories.models import Category
 from datetime import datetime as _dt
 
@@ -527,6 +528,7 @@ class TextHandler(BaseHandler):
                             context.bot,
                             update.effective_chat.id,
                             breaches_of(updated),
+                            currency=base_currency_of(telegram_user),
                         )
                     else:
                         await context.bot.send_message(
@@ -584,6 +586,7 @@ class TextHandler(BaseHandler):
                             context.bot,
                             update.effective_chat.id,
                             breaches_of(updated),
+                            currency=base_currency_of(telegram_user),
                         )
                     else:
                         await context.bot.send_message(
@@ -1549,6 +1552,7 @@ class TextHandler(BaseHandler):
                     context.bot,
                     update.effective_chat.id,
                     [limit_breach],
+                    currency=base_currency_of(telegram_user),
                 )
             logger.info("✅ Сообщение отправлено успешно")
             
@@ -1707,6 +1711,7 @@ class TextHandler(BaseHandler):
                     context.bot,
                     update.effective_chat.id,
                     [limit_breach],
+                    currency=base_currency_of(telegram_user),
                 )
             
         except Exception as e:

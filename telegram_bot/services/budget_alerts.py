@@ -27,12 +27,15 @@ class BudgetBreach:
     spent: Decimal
 
 
-def format_breach(breach: BudgetBreach) -> str:
+def format_breach(breach: BudgetBreach, currency: str = 'RUB') -> str:
+    from transactions.currencies import symbol_of
+
+    sym = symbol_of(currency)
     over = breach.spent - breach.limit
     return (
         f'⚠️ Лимит превышен: {breach.category_icon} {breach.category_name}\n'
-        f'План {breach.limit:,.0f} ₽, факт {breach.spent:,.0f} ₽, '
-        f'сверх лимита {over:,.0f} ₽.'
+        f'План {breach.limit:,.0f} {sym}, факт {breach.spent:,.0f} {sym}, '
+        f'сверх лимита {over:,.0f} {sym}.'
     )
 
 
@@ -91,7 +94,12 @@ def breach_after_limit_change(
     return _breach(budget, spent)
 
 
-async def send_budget_breaches(bot, chat_id: int, breaches: list[BudgetBreach]) -> None:
+async def send_budget_breaches(
+    bot,
+    chat_id: int,
+    breaches: list[BudgetBreach],
+    currency: str = 'RUB',
+) -> None:
     """Отдельное сообщение с выходом в бюджеты. Ошибка отправки не роняет запись."""
     if not breaches:
         return
@@ -114,7 +122,7 @@ async def send_budget_breaches(bot, chat_id: int, breaches: list[BudgetBreach]) 
     try:
         await bot.send_message(
             chat_id=chat_id,
-            text='\n\n'.join(format_breach(item) for item in breaches),
+            text='\n\n'.join(format_breach(item, currency) for item in breaches),
             reply_markup=keyboard,
         )
     except Exception:
