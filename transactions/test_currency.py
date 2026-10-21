@@ -177,3 +177,103 @@ class VndConversionTests(TestCase):
             quote = get_vnd_rub_rate()
         fetch.assert_not_called()
         self.assertEqual(quote.nominal, 10000)
+
+
+class PersonalCurrencyTests(TestCase):
+    def test_usd_mark_is_a_currency(self):
+        parsed = parse_leading_amount('20 usd кофе')
+        self.assertEqual(parsed['currency'], 'USD')
+        self.assertEqual(parsed['rest'], 'кофе')
+
+    def test_disabled_currency_is_not_explicit(self):
+        self.assertIsNone(
+            explicit_entry_currency(
+                {'currency': 'USD'},
+                allowed=['RUB', 'VND'],
+            ),
+        )
+        self.assertEqual(
+            explicit_entry_currency(
+                {'currency': 'VND'},
+                allowed=['RUB', 'VND'],
+            ),
+            'VND',
+        )
+
+    def test_cross_rate_stores_amount_in_base(self):
+        from transactions.exchange import moscow_today
+
+        user = User.objects.create_user(username='fx-usd', password='x')
+        category = Category.objects.create(
+            user=user,
+            name='Кофе',
+            type=Category.EXPENSE,
+        )
+        today = moscow_today()
+        ExchangeRate.objects.create(
+            rate_date=date(2026, 10, 14),
+            base_currency='USD',
+            quote_currency='RUB',
+            nominal=1,
+            value=Decimal('90'),
+            rate=Decimal('90'),
+            fetched_on=today,
+        )
+        ExchangeRate.objects.create(
+            rate_date=date(2026, 10, 14),
+            base_currency='EUR',
+            quote_currency='RUB',
+            nominal=1,
+            value=Decimal('100'),
+            rate=Decimal('100'),
+            fetched_on=today,
+        )
+        transaction = Transaction(
+            user=user,
+            category=category,
+            date=date(2026, 10, 14),
+        )
+        apply_entered_amount(transaction, Decimal('10'), 'USD', base='EUR')
+        transaction.save()
+        stored = Transaction.objects.get(pk=transaction.pk)
+        self.assertEqual(stored.report_currency, 'EUR')
+        self.assertEqual(stored.amount, Decimal('9.00'))
+        self.assertEqual(stored.original_amount, Decimal('10'))
+
+    def test_base_change_rescales_existing_rubles(self):
+        from transactions.exchange import change_base_currency, moscow_today
+        from telegram_bot.models import TelegramUser
+
+        user = User.objects.create_user(username='fx-base', password='x')
+        category = Category.objects.create(
+            user=user,
+            name='Кофе',
+            type=Category.EXPENSE,
+        )
+        telegram_user = TelegramUser.objects.create(
+            user=user,
+            telegram_id=4242,
+            base_currency='RUB',
+            input_currencies=['RUB', 'VND'],
+        )
+        Transaction.objects.create(
+            user=user,
+            category=category,
+            amount=Decimal('90.00'),
+            date=date(2026, 10, 14),
+        )
+        ExchangeRate.objects.create(
+            rate_date=date(2026, 10, 14),
+            base_currency='USD',
+            quote_currency='RUB',
+            nominal=1,
+            value=Decimal('90'),
+            rate=Decimal('90'),
+            fetched_on=moscow_today(),
+        )
+        change_base_currency(telegram_user, 'USD')
+        telegram_user.refresh_from_db()
+        stored = Transaction.objects.get(user=user)
+        self.assertEqual(telegram_user.base_currency, 'USD')
+        self.assertEqual(stored.amount, Decimal('1.00'))
+        self.assertEqual(stored.report_currency, 'USD')

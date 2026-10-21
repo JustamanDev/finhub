@@ -22,10 +22,10 @@
 |-----|---------------|
 | `core` | `TimestampedModel`, middleware (API version, rate limit logging) |
 | `categories` | `Category`, `DefaultCategoryTemplate`; дефолты в `default_categories.py` |
-| `transactions` | `Transaction` (рублёвый итог + исходная валюта RUB/VND), `ExchangeRate` |
+| `transactions` | `Transaction` (итог в базовой валюте + валюта ввода), `ExchangeRate` (курс к рублю, ЦБ) |
 | `budgets` | `Budget` (plan/fact, лимиты по категории/месяцу) |
 | `goals` | `Goal` (`kind`: цель `savings` или конверт `envelope`; `status` включая `archived`), `GoalLedgerEntry` (deposit / withdraw / spend) |
-| `telegram_bot` | `TelegramUser`, `UserState`, `BotText`, handlers, services |
+| `telegram_bot` | `TelegramUser` (`base_currency`, `input_currencies`), `UserState`, `BotText`, handlers, services |
 | `api` | URL routing v1 |
 
 **Не реализовано:** `accounts`, `debts`, `trading`, `analytics`, frontend.

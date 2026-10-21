@@ -2,21 +2,48 @@
 
 import re
 
-from transactions.currencies import RUB, VND
+from transactions.currencies import (
+    BY_CODE,
+    CATALOG,
+    RUB,
+    VND,
+    is_known,
+    normalize_currency_token,
+)
 
 ENTRY_CURRENCY_KEY = 'entry_currency'
 
 # Полные слова валюты. Одиночные «р»/«д» сюда не входят:
 # иначе «ресторан» теряет первую букву.
-CURRENCY_WORD = (
-    r'(?:руб(?:лей|ля|ль)?|rub|rur|vnd|dong|донг(?:ов|а|и)?|₽|₫|đ)'
+_WORD_ALIASES = sorted(
+    (
+        alias
+        for spec in CATALOG
+        for alias in spec.aliases
+        if len(alias) > 1
+    ),
+    key=len,
+    reverse=True,
+)
+CURRENCY_WORD = '(?:' + '|'.join(re.escape(alias) for alias in _WORD_ALIASES) + ')'
+_CODES = '|'.join(
+    sorted((spec.code for spec in CATALOG if spec.code != RUB), key=len, reverse=True)
+)
+_SYMBOLS = ''.join(
+    dict.fromkeys(
+        alias
+        for spec in CATALOG
+        for alias in spec.aliases
+        if len(alias) == 1 and not alias.isalpha()
+    )
 )
 
 _LEADING_AMOUNT = re.compile(
     rf'^(?P<amount>[+-]?\d+(?:[.,]\d+)?)'
     rf'(?:'
-    rf'(?P<glued>[рРдД₽₫đ])'
-    rf'|(?:\s+(?P<word>{CURRENCY_WORD}|[рРдД])\b)'
+    rf'(?P<glued>[{re.escape(_SYMBOLS)}рд])'
+    rf'|(?P<code>{_CODES})'
+    rf'|(?:\s+(?P<word>{CURRENCY_WORD}|[рд])\b)'
     rf')?'
     rf'(?:\s+(?P<rest>.+))?$',
     re.IGNORECASE,
@@ -30,37 +57,28 @@ _RUB_MENTION = re.compile(
 )
 
 
-def normalize_currency_token(token: str | None) -> str | None:
-    """Слово или короткая пометка → RUB / VND. Неизвестное → None."""
-    if not token:
-        return None
-    cleaned = token.strip().lower().rstrip('.')
-    if cleaned.startswith('руб') or cleaned in {'р', '₽', 'rub', 'rur'}:
-        return RUB
-    if (
-        cleaned.startswith('донг')
-        or cleaned in {'д', '₫', 'đ', 'vnd', 'dong'}
-    ):
-        return VND
-    return None
-
-
 def explicit_entry_currency(
     parsed_command: dict | None,
     transcript: str | None = None,
+    allowed: list[str] | tuple[str, ...] | None = None,
 ) -> str | None:
     """
     Валюта, которую пользователь назвал сам.
 
     Нет пометки — None: бот должен спросить, а не подставлять валюту молча.
+    Если передан allowed, код вне этого списка тоже считается непомеченным.
     """
     parsed_command = parsed_command or {}
     explicit = parsed_command.get('currency')
-    if explicit in {RUB, VND}:
-        return explicit
-    return detect_currency_mention(
-        transcript or parsed_command.get('raw_text') or '',
-    )
+    if not is_known(explicit):
+        explicit = detect_currency_mention(
+            transcript or parsed_command.get('raw_text') or '',
+        )
+    if not is_known(explicit):
+        return None
+    if allowed is not None and explicit not in allowed:
+        return None
+    return explicit
 
 
 def detect_currency_mention(text: str | None) -> str | None:
@@ -71,26 +89,54 @@ def detect_currency_mention(text: str | None) -> str | None:
     """
     if not text:
         return None
-    has_dong = _DONG_MENTION.search(text) is not None
-    has_rub = _RUB_MENTION.search(text) is not None
-    if has_dong and not has_rub:
-        return VND
-    if has_rub and not has_dong:
-        return RUB
+    found: set[str] = set()
+    if _DONG_MENTION.search(text) is not None:
+        found.add(VND)
+    if _RUB_MENTION.search(text) is not None:
+        found.add(RUB)
+    for spec in CATALOG:
+        if spec.code in {RUB, VND}:
+            continue
+        mention = _mention_pattern(spec)
+        if mention.search(text):
+            found.add(spec.code)
+    if len(found) == 1:
+        return next(iter(found))
     return None
+
+
+def _mention_pattern(spec) -> re.Pattern[str]:
+    cached = _MENTION_PATTERNS.get(spec.code)
+    if cached is not None:
+        return cached
+    parts = []
+    for alias in spec.aliases:
+        if len(alias) == 1 and alias.isalpha():
+            continue
+        if len(alias) == 1:
+            parts.append(re.escape(alias))
+        else:
+            parts.append(rf'\b{re.escape(alias)}\b')
+    parts.sort(key=len, reverse=True)
+    compiled = re.compile('|'.join(parts) or r'(?!)', re.IGNORECASE)
+    _MENTION_PATTERNS[spec.code] = compiled
+    return compiled
+
+
+_MENTION_PATTERNS: dict[str, re.Pattern[str]] = {}
 
 
 def parse_leading_amount(text: str) -> dict | None:
     """
     «500 кофе», «50000д кофе», «1500 руб такси», «50000».
 
-    Возвращает amount (строка как в тексте), currency (RUB/VND/None)
+    Возвращает amount (строка как в тексте), currency (код каталога или None)
     и rest (хвост без валюты) либо None, если строка не про сумму.
     """
     match = _LEADING_AMOUNT.match((text or '').strip())
     if not match:
         return None
-    token = match.group('glued') or match.group('word')
+    token = match.group('glued') or match.group('code') or match.group('word')
     rest = (match.group('rest') or '').strip()
     return {
         'amount': match.group('amount'),
@@ -117,4 +163,7 @@ def currency_suffix(currency: str | None) -> str:
         return 'д'
     if currency == RUB:
         return 'р'
-    return ''
+    spec = BY_CODE.get(currency or '')
+    if spec is None:
+        return ''
+    return spec.code.lower()

@@ -6,7 +6,7 @@ from django.contrib.auth.models import User
 from django.db import models
 from asgiref.sync import sync_to_async
 
-from transactions.currencies import RUB, VND
+from transactions.currencies import RUB, base_for_user
 from transactions.exchange import apply_entered_amount, rub_amount
 from transactions.models import Transaction
 from categories.models import Category
@@ -42,7 +42,7 @@ class TransactionService:
             transaction_type: Тип транзакции ('expense' или 'income')
             transaction_date: Дата транзакции (по умолчанию сегодня)
             description: Описание транзакции
-            currency: Валюта введённой суммы. Донги переводятся в рубли.
+            currency: Валюта введённой суммы. Не базовая переводится в базовую.
             
         Returns:
             Созданная транзакция
@@ -65,7 +65,12 @@ class TransactionService:
                 date=transaction_date,
                 description=description,
             )
-            apply_entered_amount(transaction, signed, currency or RUB)
+            apply_entered_amount(
+                transaction,
+                signed,
+                currency or RUB,
+                base=base_for_user(self.user),
+            )
             transaction.save()
             transaction._budget_breaches = breaches_after_spend(
                 self.user,
@@ -187,11 +192,12 @@ class TransactionService:
             else:
                 signed = abs(new_amount)
 
-            if transaction.currency == VND and transaction.exchange_rate:
+            report_currency = transaction.report_currency or RUB
+            if transaction.currency != report_currency and transaction.exchange_rate:
                 transaction.original_amount = signed
                 transaction.amount = rub_amount(signed, transaction.exchange_rate)
             else:
-                transaction.currency = RUB
+                transaction.currency = report_currency
                 transaction.original_amount = signed
                 transaction.exchange_rate = Decimal('1')
                 transaction.rate_date = None

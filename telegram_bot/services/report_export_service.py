@@ -51,8 +51,11 @@ class ReportExportService:
         )()
         goal_entries = await self._get_goal_entries(start_date, end_date)
 
+        from transactions.currencies import base_for_user
+
         report_title = f"FinHub — отчет за {month:02d}.{year}"
         filename = f"finhub_report_{year}-{month:02d}.xlsx"
+        currency = await sync_to_async(base_for_user, thread_sensitive=True)(self.user)
 
         content = self._render_excel(
             report_title=report_title,
@@ -62,6 +65,7 @@ class ReportExportService:
             goals=goals,
             goal_parts=goal_parts,
             goal_entries=goal_entries,
+            currency=currency,
         )
 
         return ExcelExportResult(
@@ -126,6 +130,7 @@ class ReportExportService:
         goals: list[Goal],
         goal_parts: dict[int, LedgerTotals],
         goal_entries: list[GoalLedgerEntry],
+        currency: str = 'RUB',
     ) -> bytes:
         try:
             import xlsxwriter
@@ -134,6 +139,9 @@ class ReportExportService:
                 "xlsxwriter не установлен. Добавьте зависимость 'xlsxwriter' в проект."
             ) from exc
 
+        from transactions.currencies import reports_phrase, symbol_of
+
+        unit = symbol_of(currency)
         output = io.BytesIO()
         workbook = xlsxwriter.Workbook(output, {"in_memory": True})
 
@@ -260,7 +268,8 @@ class ReportExportService:
             "  Это НЕ «баланс банковского счета», а динамика «свободно для трат» за месяц.\n"
             "• Цель копит к сумме: на листе «Цели» прогресс не падает от покупок.\n"
             "• Конверт — кучка без процента. Лист «Конверты»: внесено, потрачено, остаток.\n"
-            "• Покупка из цели или конверта есть и в расходах, и как «Покупка» в операциях.",
+            "• Покупка из цели или конверта есть и в расходах, и как «Покупка» в операциях.\n"
+            f"• Все суммы в {reports_phrase(currency)}.",
             fmt_note,
         )
 
@@ -308,7 +317,7 @@ class ReportExportService:
             }
         )
         chart_balance.set_title({"name": "Свободно для трат (с учетом целей)"})
-        chart_balance.set_y_axis({"name": "₽"})
+        chart_balance.set_y_axis({"name": unit})
         ws_summary.insert_chart("D4", chart_balance, {"x_scale": 1.2, "y_scale": 1.2})
 
         def _shown(goal: Goal) -> bool:
@@ -339,15 +348,15 @@ class ReportExportService:
             "Цель",
             "Статус",
             "Дедлайн",
-            "Цель (₽)",
-            "Накоплено (₽)",
-            "Потрачено (₽)",
-            "Сейчас лежит (₽)",
-            "Осталось накопить (₽)",
+            f"Цель ({unit})",
+            f"Накоплено ({unit})",
+            f"Потрачено ({unit})",
+            f"Сейчас лежит ({unit})",
+            f"Осталось накопить ({unit})",
             "Прогресс (%)",
-            "План/мес (₽)",
-            "Внесено в этом месяце (₽)",
-            "Осталось внести в этом месяце (₽)",
+            f"План/мес ({unit})",
+            f"Внесено в этом месяце ({unit})",
+            f"Осталось внести в этом месяце ({unit})",
         )):
             ws_goals.write(0, col, title, fmt_header)
 
@@ -403,10 +412,10 @@ class ReportExportService:
         for col, title in enumerate((
             "Конверт",
             "Статус",
-            "Внесено (₽)",
-            "Потрачено (₽)",
-            "Снято (₽)",
-            "Остаток (₽)",
+            f"Внесено ({unit})",
+            f"Потрачено ({unit})",
+            f"Снято ({unit})",
+            f"Остаток ({unit})",
         )):
             ws_env.write(0, col, title, fmt_header)
         envelopes = [g for g in goals if g.is_envelope and _shown(g)]
@@ -433,7 +442,7 @@ class ReportExportService:
         ws_ops.write(0, 1, "Название", fmt_header)
         ws_ops.write(0, 2, "Где", fmt_header)
         ws_ops.write(0, 3, "Тип", fmt_header)
-        ws_ops.write(0, 4, "Сумма (₽)", fmt_header)
+        ws_ops.write(0, 4, f"Сумма ({unit})", fmt_header)
         ws_ops.write(0, 5, "Комментарий", fmt_header)
 
         type_map = {
@@ -515,7 +524,7 @@ class ReportExportService:
                 }
             )
             chart_exp_cat.set_title({"name": "Расходы по категориям (топ-10)"})
-            chart_exp_cat.set_y_axis({"name": "₽"})
+            chart_exp_cat.set_y_axis({"name": unit})
             ws_summary.insert_chart("D20", chart_exp_cat, {"x_scale": 1.2, "y_scale": 1.2})
 
         # ---- sheet: Транзакции ----
@@ -533,7 +542,7 @@ class ReportExportService:
         ws_tx.write(0, 0, "Дата", fmt_header)
         ws_tx.write(0, 1, "Тип", fmt_header)
         ws_tx.write(0, 2, "Категория", fmt_header)
-        ws_tx.write(0, 3, "Сумма (₽)", fmt_header)
+        ws_tx.write(0, 3, f"Сумма ({unit})", fmt_header)
         ws_tx.write(0, 4, "Валюта ввода", fmt_header)
         ws_tx.write(0, 5, "Сумма ввода", fmt_header)
         ws_tx.write(0, 6, "Комментарий", fmt_header)

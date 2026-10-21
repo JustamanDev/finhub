@@ -39,6 +39,12 @@ def list_goals_for_spend(user: User) -> list[tuple[Goal, Decimal]]:
     return [(goal, goal_balance(goal.id)) for goal in goals]
 
 
+def _money_symbol(user) -> str:
+    from transactions.currencies import base_for_user, symbol_of
+
+    return symbol_of(base_for_user(user))
+
+
 def goal_spend_note(transaction_id: int) -> str:
     """Строка для карточки, если расход уже списан с цели."""
     entry = (
@@ -53,14 +59,15 @@ def goal_spend_note(transaction_id: int) -> str:
     if entry is None:
         return ''
     remaining = goal_balance(entry.goal_id)
+    sym = _money_symbol(entry.goal.user)
     if entry.goal.is_envelope:
         return (
             f'\nИз конверта «{entry.goal.title}». '
-            f'На конверте осталось {remaining:,.0f} ₽.'
+            f'На конверте осталось {remaining:,.0f} {sym}.'
         )
     return (
         f'\nИз цели «{entry.goal.title}». '
-        f'На цели осталось {remaining:,.0f} ₽.'
+        f'На цели осталось {remaining:,.0f} {sym}.'
     )
 
 
@@ -98,11 +105,12 @@ def spend_expense_from_goal(
     available = goal_balance(goal.id) + already_here
     if need > available:
         place = 'конверте' if goal.is_envelope else 'цели'
+        sym = _money_symbol(user)
         return GoalSpendResult(
             False,
             (
-                f'На {place} «{goal.title}» {available:,.0f} ₽, '
-                f'для этой траты нужно {need:,.0f} ₽.'
+                f'На {place} «{goal.title}» {available:,.0f} {sym}, '
+                f'для этой траты нужно {need:,.0f} {sym}.'
             ),
         )
 
@@ -132,9 +140,10 @@ def ensure_spend_fits(transaction: Transaction, new_abs_amount: Decimal) -> None
     available = goal_balance(entry.goal_id) + abs(entry.amount)
     if new_abs_amount > available:
         place = 'конверте' if entry.goal.is_envelope else 'цели'
+        sym = _money_symbol(transaction.user)
         raise GoalSpendShortfall(
-            f'На {place} «{entry.goal.title}» {available:,.0f} ₽, '
-            f'нужно {new_abs_amount:,.0f} ₽.',
+            f'На {place} «{entry.goal.title}» {available:,.0f} {sym}, '
+            f'нужно {new_abs_amount:,.0f} {sym}.',
         )
 
 

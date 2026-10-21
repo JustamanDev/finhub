@@ -477,30 +477,40 @@ class SettingsHandler(BaseHandler):
         context: ContextTypes.DEFAULT_TYPE,
         telegram_user,
     ) -> None:
-        """Валюта ввода и пояснение, что отчёты всегда в рублях."""
+        """Базовая валюта отчётов и набор валют для ввода суммы."""
+        from transactions.currencies import button_label, prefs_tuple
+
+        base, inputs = await sync_to_async(prefs_tuple)(telegram_user)
+        names = ', '.join(button_label(code) for code in inputs)
         message = (
             "⚙️ **Общие настройки**\n\n"
-            "Если в сообщении нет валюты, бот спросит: рубли или донги.\n"
-            "Явно: `50000д кофе` или `1500 руб такси` — без вопроса.\n"
-            "Отчёты всегда в рублях. Донги пересчитываются "
-            "по курсу ЦБ на день записи."
+            f"Базовая валюта: **{button_label(base)}**. "
+            "В ней отчёты, лимиты и цели.\n"
+            f"После суммы бот предлагает: {names}.\n"
+            "Если валюта названа в тексте и она в этом списке, вопрос не задаётся.\n"
+            "Курс берётся у ЦБ раз в сутки по Москве и фиксируется на операции."
         )
-        
         keyboard = [
             [
                 InlineKeyboardButton(
+                    text="Базовая валюта",
+                    callback_data="settings_base",
+                ),
+            ],
+            [
+                InlineKeyboardButton(
+                    text="Валюты ввода",
+                    callback_data="settings_inputs",
+                ),
+            ],
+            [
+                InlineKeyboardButton(
                     text="🔙 Назад",
-                    callback_data="settings"
+                    callback_data="settings",
                 ),
             ],
         ]
-        
-        await self._send_or_edit_message(
-            update,
-            context,
-            message,
-            keyboard,
-        )
+        await self._send_or_edit_message(update, context, message, keyboard)
 
     async def handle_currency_toggle(
         self,
@@ -509,6 +519,177 @@ class SettingsHandler(BaseHandler):
         telegram_user,
     ) -> None:
         await self.handle_general_settings(update, context, telegram_user)
+
+    async def handle_base_currency_menu(
+        self,
+        update: Update | CallbackQuery,
+        context: ContextTypes.DEFAULT_TYPE,
+        telegram_user,
+    ) -> None:
+        from transactions.currencies import CATALOG, button_label, prefs_tuple
+
+        base, _inputs = await sync_to_async(prefs_tuple)(telegram_user)
+        rows = []
+        pair = []
+        for spec in CATALOG:
+            mark = '✓ ' if spec.code == base else ''
+            pair.append(
+                InlineKeyboardButton(
+                    text=f'{mark}{button_label(spec.code)}',
+                    callback_data=f'settings_base_{spec.code}',
+                )
+            )
+            if len(pair) == 2:
+                rows.append(pair)
+                pair = []
+        if pair:
+            rows.append(pair)
+        rows.append([
+            InlineKeyboardButton(text='🔙 Назад', callback_data='settings_general'),
+        ])
+        await self._send_or_edit_message(
+            update,
+            context,
+            "Базовая валюта — в ней отчёты, лимиты и цели.",
+            rows,
+        )
+
+    async def handle_base_currency_pick(
+        self,
+        update: Update | CallbackQuery,
+        context: ContextTypes.DEFAULT_TYPE,
+        telegram_user,
+        code: str,
+    ) -> None:
+        from transactions.currencies import button_label, is_known, prefs_tuple
+
+        if not is_known(code):
+            await self.handle_base_currency_menu(update, context, telegram_user)
+            return
+        base, _inputs = await sync_to_async(prefs_tuple)(telegram_user)
+        if code == base:
+            await self.handle_general_settings(update, context, telegram_user)
+            return
+        message = (
+            f"Сменить базовую валюту на **{button_label(code)}**?\n\n"
+            "Уже записанные операции, лимиты и цели пересчитаются "
+            "по сегодняшнему курсу ЦБ. Новые отчёты будут в этой валюте."
+        )
+        keyboard = [
+            [
+                InlineKeyboardButton(
+                    text='Да, пересчитать',
+                    callback_data=f'settings_base_yes_{code}',
+                ),
+            ],
+            [
+                InlineKeyboardButton(
+                    text='Отмена',
+                    callback_data='settings_base',
+                ),
+            ],
+        ]
+        await self._send_or_edit_message(update, context, message, keyboard)
+
+    async def handle_base_currency_confirm(
+        self,
+        update: Update | CallbackQuery,
+        context: ContextTypes.DEFAULT_TYPE,
+        telegram_user,
+        code: str,
+    ) -> None:
+        from transactions.currencies import button_label, is_known
+        from transactions.exchange import ExchangeRateUnavailable, change_base_currency
+
+        if not is_known(code):
+            await self.handle_base_currency_menu(update, context, telegram_user)
+            return
+        try:
+            await sync_to_async(change_base_currency, thread_sensitive=True)(
+                telegram_user,
+                code,
+            )
+        except ExchangeRateUnavailable as exc:
+            await self._send_or_edit_message(
+                update,
+                context,
+                f'Не сменил базовую валюту.\n{exc}',
+                [[InlineKeyboardButton(text='🔙 Назад', callback_data='settings_general')]],
+            )
+            return
+        await self._send_or_edit_message(
+            update,
+            context,
+            f'Базовая валюта теперь **{button_label(code)}**. '
+            'Уже записанные суммы пересчитаны.',
+            [[InlineKeyboardButton(text='К настройкам', callback_data='settings_general')]],
+        )
+
+    async def handle_input_currencies(
+        self,
+        update: Update | CallbackQuery,
+        context: ContextTypes.DEFAULT_TYPE,
+        telegram_user,
+    ) -> None:
+        from transactions.currencies import CATALOG, button_label, prefs_tuple
+
+        _base, inputs = await sync_to_async(prefs_tuple)(telegram_user)
+        rows = []
+        pair = []
+        for spec in CATALOG:
+            mark = '✓ ' if spec.code in inputs else ''
+            pair.append(
+                InlineKeyboardButton(
+                    text=f'{mark}{button_label(spec.code)}',
+                    callback_data=f'settings_input_{spec.code}',
+                )
+            )
+            if len(pair) == 2:
+                rows.append(pair)
+                pair = []
+        if pair:
+            rows.append(pair)
+        rows.append([
+            InlineKeyboardButton(text='🔙 Назад', callback_data='settings_general'),
+        ])
+        await self._send_or_edit_message(
+            update,
+            context,
+            'Отметьте валюты, которые бот предлагает после суммы. '
+            'Хотя бы одна должна остаться.',
+            rows,
+        )
+
+    async def handle_input_currency_toggle(
+        self,
+        update: Update | CallbackQuery,
+        context: ContextTypes.DEFAULT_TYPE,
+        telegram_user,
+        code: str,
+    ) -> None:
+        from transactions.currencies import input_codes_of, is_known, ordered_codes
+
+        if not is_known(code):
+            await self.handle_input_currencies(update, context, telegram_user)
+            return
+
+        def _toggle():
+            current = input_codes_of(telegram_user)
+            if code in current:
+                if len(current) == 1:
+                    return False
+                current = [item for item in current if item != code]
+            else:
+                current = ordered_codes([*current, code])
+            telegram_user.input_currencies = current
+            telegram_user.save(update_fields=['input_currencies', 'updated_at'])
+            return True
+
+        changed = await sync_to_async(_toggle, thread_sensitive=True)()
+        query = update if isinstance(update, CallbackQuery) else getattr(update, 'callback_query', None)
+        if not changed and query is not None:
+            await query.answer('Нужна хотя бы одна валюта')
+        await self.handle_input_currencies(update, context, telegram_user)
     
     async def handle_limits_settings(
         self,

@@ -5,7 +5,7 @@ from django.db import models
 from django.contrib.auth.models import User
 from core.models import TimestampedModel
 from categories.models import Category
-from transactions.currencies import CURRENCY_CHOICES, RUB
+from transactions.currencies import CURRENCY_CHOICES, RUB, is_known
 
 
 logger = logging.getLogger('transactions')
@@ -19,21 +19,29 @@ class Transaction(TimestampedModel):
     привязанную к определенной категории и пользователю.
     
     Attributes:
-        amount: Сумма в рублях (для отчётов), со знаком
+        amount: Сумма в валюте отчёта (базовая на момент записи), со знаком
         original_amount: Сумма в валюте ввода, со знаком
-        currency: RUB или VND — как сумму ввели
-        exchange_rate: Рублей за 1 единицу валюты ввода
+        currency: как сумму ввели
+        report_currency: в какой валюте лежит amount
+        exchange_rate: единиц валюты отчёта за 1 единицу валюты ввода
         description: Описание транзакции
         category: Категория транзакции
         date: Дата совершения транзакции
         user: Владелец транзакции
     """
-    amount = models.DecimalField('Сумма в рублях', max_digits=12, decimal_places=2)
+    amount = models.DecimalField('Сумма в валюте отчёта', max_digits=12, decimal_places=2)
     currency = models.CharField(
         'Валюта ввода',
         max_length=3,
         choices=CURRENCY_CHOICES,
         default=RUB,
+    )
+    report_currency = models.CharField(
+        'Валюта отчёта',
+        max_length=3,
+        choices=CURRENCY_CHOICES,
+        default=RUB,
+        help_text='В какой валюте лежит amount. По умолчанию рубли.',
     )
     original_amount = models.DecimalField(
         'Сумма в валюте ввода',
@@ -43,11 +51,11 @@ class Transaction(TimestampedModel):
         blank=True,
     )
     exchange_rate = models.DecimalField(
-        'Курс к рублю',
+        'Курс к валюте отчёта',
         max_digits=20,
         decimal_places=10,
         default=Decimal('1'),
-        help_text='Сколько рублей за 1 единицу валюты ввода. Для рублей = 1.',
+        help_text='Сколько единиц валюты отчёта за 1 единицу валюты ввода. Если они совпадают, курс = 1.',
     )
     rate_date = models.DateField('Дата курса ЦБ', null=True, blank=True)
     rate_nominal = models.PositiveIntegerField(
@@ -74,12 +82,13 @@ class Transaction(TimestampedModel):
         ]
         
     def __str__(self):
-        if self.currency != RUB and self.original_amount is not None:
+        report = self.report_currency or RUB
+        if self.currency != report and self.original_amount is not None:
             return (
                 f"{self.original_amount} {self.currency} "
-                f"({self.amount} руб.) - {self.category.name} ({self.date})"
+                f"({self.amount} {report}) - {self.category.name} ({self.date})"
             )
-        return f"{self.amount} руб. - {self.category.name} ({self.date})"
+        return f"{self.amount} {report} - {self.category.name} ({self.date})"
         
     @property
     def is_income(self):
@@ -103,8 +112,10 @@ class Transaction(TimestampedModel):
         
     def save(self, *args, **kwargs):
         """Переопределенный метод сохранения с логированием."""
-        if not self.currency:
+        if not self.currency or not is_known(self.currency):
             self.currency = RUB
+        if not self.report_currency or not is_known(self.report_currency):
+            self.report_currency = RUB
         if self.exchange_rate is None:
             self.exchange_rate = Decimal('1')
         if self.original_amount is None:

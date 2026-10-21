@@ -14,6 +14,7 @@ from telegram_bot.services.category_management_service import CategoryManagement
 from telegram_bot.services.goal_service import GoalService, GoalTitleTaken
 from telegram_bot.voice.interpreter import voice_text_parse_candidates
 from budgets.models import Budget
+from transactions.currencies import base_currency_of
 from categories.models import Category
 from datetime import datetime as _dt
 
@@ -527,6 +528,7 @@ class TextHandler(BaseHandler):
                             context.bot,
                             update.effective_chat.id,
                             breaches_of(updated),
+                            currency=base_currency_of(telegram_user),
                         )
                     else:
                         await context.bot.send_message(
@@ -584,6 +586,7 @@ class TextHandler(BaseHandler):
                             context.bot,
                             update.effective_chat.id,
                             breaches_of(updated),
+                            currency=base_currency_of(telegram_user),
                         )
                     else:
                         await context.bot.send_message(
@@ -1156,7 +1159,11 @@ class TextHandler(BaseHandler):
             voice_create_after = bool(context_data.get('voice_create_after'))
             voice_intent = context_data.get('voice_intent') or ''
             pending_amount = user_state.current_amount
-            pending_currency = context_data.get('entry_currency') or 'RUB'
+            from transactions.currencies import base_currency_of
+
+            pending_currency = context_data.get('entry_currency') or (
+                await sync_to_async(base_currency_of)(telegram_user)
+            )
 
             # Сбрасываем состояние создания категории
             user_state.awaiting_category_creation = False
@@ -1549,6 +1556,7 @@ class TextHandler(BaseHandler):
                     context.bot,
                     update.effective_chat.id,
                     [limit_breach],
+                    currency=base_currency_of(telegram_user),
                 )
             logger.info("✅ Сообщение отправлено успешно")
             
@@ -1707,6 +1715,7 @@ class TextHandler(BaseHandler):
                     context.bot,
                     update.effective_chat.id,
                     [limit_breach],
+                    currency=base_currency_of(telegram_user),
                 )
             
         except Exception as e:

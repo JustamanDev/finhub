@@ -4,7 +4,7 @@ from rest_framework import serializers
 from .models import Transaction
 from categories.models import Category
 from categories.serializers import CategorySerializer
-from transactions.currencies import RUB
+from transactions.currencies import RUB, base_for_user
 from transactions.exchange import ExchangeRateUnavailable, apply_entered_amount
 
 
@@ -50,14 +50,20 @@ class TransactionSerializer(serializers.ModelSerializer):
         entered = validated_data.pop('amount')
         transaction = Transaction(amount=entered, **validated_data)
         try:
-            apply_entered_amount(transaction, entered, currency)
+            apply_entered_amount(
+                transaction,
+                entered,
+                currency,
+                base=base_for_user(transaction.user),
+            )
         except ExchangeRateUnavailable as exc:
             raise serializers.ValidationError({'amount': str(exc)}) from exc
         transaction.save()
         return transaction
 
     def update(self, instance, validated_data):
-        if 'amount' in validated_data and instance.currency == RUB:
+        report_currency = instance.report_currency or RUB
+        if 'amount' in validated_data and instance.currency == report_currency:
             validated_data['original_amount'] = validated_data['amount']
             validated_data['exchange_rate'] = Decimal('1')
         return super().update(instance, validated_data)
@@ -95,7 +101,7 @@ class TransactionCreateSerializer(serializers.ModelSerializer):
             'currency': {
                 'required': False,
                 'default': RUB,
-                'help_text': 'Валюта поля amount при создании. В ответе amount уже в рублях.',
+                'help_text': 'Валюта поля amount при создании. В ответе amount уже в базовой валюте.',
             },
         }
 
@@ -105,7 +111,12 @@ class TransactionCreateSerializer(serializers.ModelSerializer):
         entered = validated_data.pop('amount')
         transaction = Transaction(amount=entered, **validated_data)
         try:
-            apply_entered_amount(transaction, entered, currency)
+            apply_entered_amount(
+                transaction,
+                entered,
+                currency,
+                base=base_for_user(transaction.user),
+            )
         except ExchangeRateUnavailable as exc:
             raise serializers.ValidationError({'amount': str(exc)}) from exc
         transaction.save()

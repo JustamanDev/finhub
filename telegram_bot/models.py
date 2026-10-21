@@ -1,7 +1,7 @@
 from django.db import models
 from django.contrib.auth.models import User
 from core.models import TimestampedModel
-from transactions.currencies import CURRENCY_CHOICES, RUB
+from transactions.currencies import CURRENCY_CHOICES, RUB, default_input_currencies
 
 
 class TelegramUser(TimestampedModel):
@@ -31,7 +31,19 @@ class TelegramUser(TimestampedModel):
         max_length=3,
         choices=CURRENCY_CHOICES,
         default=RUB,
-        help_text='Если в сообщении нет пометки «руб» или «донг».',
+        help_text='Больше не используется: бот спрашивает валюту из input_currencies.',
+    )
+    base_currency = models.CharField(
+        'Базовая валюта',
+        max_length=3,
+        choices=CURRENCY_CHOICES,
+        default=RUB,
+        help_text='В ней отчёты, лимиты и цели.',
+    )
+    input_currencies = models.JSONField(
+        'Валюты ввода',
+        default=default_input_currencies,
+        help_text='Кнопки после суммы без явной пометки валюты.',
     )
     is_active = models.BooleanField(default=True)
 

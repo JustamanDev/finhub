@@ -354,6 +354,35 @@ class CallbackHandler(BaseHandler):
             elif query.data == "settings_general":
                 logger.info("Вызываем _handle_settings_general")
                 await self._handle_settings_general(query, context, telegram_user)
+            elif query.data == "settings_base":
+                await self._settings_handler().handle_base_currency_menu(
+                    query, context, telegram_user,
+                )
+            elif query.data.startswith("settings_base_yes_"):
+                await self._settings_handler().handle_base_currency_confirm(
+                    query,
+                    context,
+                    telegram_user,
+                    query.data.removeprefix("settings_base_yes_"),
+                )
+            elif query.data.startswith("settings_base_"):
+                await self._settings_handler().handle_base_currency_pick(
+                    query,
+                    context,
+                    telegram_user,
+                    query.data.removeprefix("settings_base_"),
+                )
+            elif query.data == "settings_inputs":
+                await self._settings_handler().handle_input_currencies(
+                    query, context, telegram_user,
+                )
+            elif query.data.startswith("settings_input_"):
+                await self._settings_handler().handle_input_currency_toggle(
+                    query,
+                    context,
+                    telegram_user,
+                    query.data.removeprefix("settings_input_"),
+                )
             elif query.data == "settings_currency_toggle":
                 await self._handle_settings_currency_toggle(
                     query,
@@ -455,16 +484,22 @@ class CallbackHandler(BaseHandler):
                 await self._handle_report_navigation(query, context, telegram_user)
             elif query.data == "report_disabled":
                 await query.answer("Нет доступных отчетов для навигации")
-            elif query.data in ('entry_currency_RUB', 'entry_currency_VND'):
-                await self._command_executor.apply_entry_currency(
-                    update,
-                    context,
-                    telegram_user,
-                    query.data.rsplit('_', 1)[-1],
-                )
             elif query.data == 'entry_currency_cancel':
                 context.user_data.pop('pending_currency_entry', None)
                 await self._handle_main_menu(query, context, telegram_user)
+            elif query.data.startswith('entry_currency_'):
+                from transactions.currencies import is_known
+
+                code = query.data.removeprefix('entry_currency_')
+                if not is_known(code):
+                    await query.answer('Неизвестная валюта')
+                else:
+                    await self._command_executor.apply_entry_currency(
+                        update,
+                        context,
+                        telegram_user,
+                        code,
+                    )
             elif query.data.startswith('delete_transaction_'):
                 await self._handle_transaction_delete(query, context, telegram_user)
             else:
@@ -714,11 +749,13 @@ class CallbackHandler(BaseHandler):
             breaches_of,
             send_budget_breaches,
         )
+        from transactions.currencies import base_currency_of
 
         await send_budget_breaches(
             context.bot,
             query.message.chat_id,
             breaches_of(transaction),
+            currency=base_currency_of(telegram_user),
         )
 
     async def _handle_tx_goal_list(
@@ -736,10 +773,13 @@ class CallbackHandler(BaseHandler):
         if not goals:
             await query.answer('Активных целей и конвертов нет.')
             return
+        from transactions.currencies import base_currency_of, symbol_of
+
+        sym = symbol_of(base_currency_of(telegram_user))
         buttons = []
         for goal, balance in goals:
             icon = '📦' if goal.is_envelope else '🎯'
-            label = f'{icon} {goal.title} · {balance:,.0f} ₽'
+            label = f'{icon} {goal.title} · {balance:,.0f} {sym}'
             buttons.append([
                 InlineKeyboardButton(
                     text=label[:60],
@@ -997,12 +1037,14 @@ class CallbackHandler(BaseHandler):
         user = await sync_to_async(lambda: telegram_user.user)()
         transaction_service = TransactionService(user)
         stats = await transaction_service.get_today_statistics()
-        
+        from transactions.currencies import base_currency_of, symbol_of
+
+        sym = symbol_of(base_currency_of(telegram_user))
         stats_text = (
             f"📊 Статистика за сегодня:\n\n"
-            f"💸 Расходы: {stats['expenses']:,.0f}₽\n"
-            f"💰 Доходы: {stats['income']:,.0f}₽\n"
-            f"💵 Баланс: {stats['balance']:,.0f}₽\n\n"
+            f"💸 Расходы: {stats['expenses']:,.0f}{sym}\n"
+            f"💰 Доходы: {stats['income']:,.0f}{sym}\n"
+            f"💵 Баланс: {stats['balance']:,.0f}{sym}\n\n"
         )
         
         if stats['balance'] > 0:
@@ -1190,6 +1232,11 @@ class CallbackHandler(BaseHandler):
         else:
             await query.answer("Неизвестная команда")
     
+    def _settings_handler(self):
+        from telegram_bot.handlers.settings_handler import SettingsHandler
+
+        return SettingsHandler()
+
     async def _handle_settings_general(
         self,
         query: CallbackQuery,

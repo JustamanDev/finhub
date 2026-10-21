@@ -10,6 +10,12 @@ from telegram_bot.keyboards.navigation import attach_persistent_navigation
 logger = logging.getLogger(__name__)
 
 
+def _money_symbol(telegram_user) -> str:
+    from transactions.currencies import base_currency_of, symbol_of
+
+    return symbol_of(base_currency_of(telegram_user))
+
+
 class BudgetHandler(BaseHandler):
     """Обработчик управления бюджетами"""
     
@@ -60,6 +66,7 @@ class BudgetHandler(BaseHandler):
         telegram_user,
     ) -> None:
         """Показывает список бюджетов"""
+        sym = _money_symbol(telegram_user)
         from asgiref.sync import sync_to_async
         from budgets.models import Budget
         
@@ -106,9 +113,9 @@ class BudgetHandler(BaseHandler):
                 
                 budgets_text += (
                     f"• {budget.category.icon} {budget.category.name}\n"
-                    f"  {budget.amount:,.2f} ₽ ({spent_percent:.1f}%)\n"
-                    f"  Потрачено: {spent_amount:,.2f} ₽\n"
-                    f"  Остаток: {remaining_amount:,.2f} ₽\n"
+                    f"  {budget.amount:,.2f} {sym} ({spent_percent:.1f}%)\n"
+                    f"  Потрачено: {spent_amount:,.2f} {sym}\n"
+                    f"  Остаток: {remaining_amount:,.2f} {sym}\n"
                     f"  {status_icon} {budget.get_period_type_display()}\n\n"
                 )
                 
@@ -149,6 +156,7 @@ class BudgetHandler(BaseHandler):
         budget_id: int,
     ) -> None:
         """Показывает детали бюджета"""
+        sym = _money_symbol(telegram_user)
         context.user_data.pop('waiting_for_budget_amount', None)
         context.user_data.pop('editing_budget_id', None)
         from asgiref.sync import sync_to_async
@@ -181,14 +189,14 @@ class BudgetHandler(BaseHandler):
         
         message = (
             f"📊 **Бюджет: {budget.category.icon} {budget.category.name}**\n\n"
-            f"💰 **План:** {budget.amount:,.2f} ₽\n"
-            f"💸 **Потрачено:** {spent_amount:,.2f} ₽\n"
-            f"✅ **Остаток:** {remaining_amount:,.2f} ₽\n"
+            f"💰 **План:** {budget.amount:,.2f} {sym}\n"
+            f"💸 **Потрачено:** {spent_amount:,.2f} {sym}\n"
+            f"✅ **Остаток:** {remaining_amount:,.2f} {sym}\n"
             f"📈 **Выполнение:** {spent_percent:.1f}% {status_icon}\n"
             f"📅 **Период:** {budget.get_period_type_display()}\n"
             f"📆 **Даты:** {budget.start_date} - {budget.end_date}\n"
             f"⏰ **Дней осталось:** {days_remaining}\n"
-            f"💡 **Дневной бюджет:** {daily_budget:,.2f} ₽"
+            f"💡 **Дневной бюджет:** {daily_budget:,.2f} {sym}"
         )
         
         keyboard = InlineKeyboardMarkup([
@@ -349,6 +357,7 @@ class BudgetHandler(BaseHandler):
         budget_id: int,
     ) -> None:
         """Показывает форму для редактирования бюджета"""
+        sym = _money_symbol(telegram_user)
         from asgiref.sync import sync_to_async
         from budgets.models import Budget
         
@@ -378,7 +387,7 @@ class BudgetHandler(BaseHandler):
         message = (
             f"✏️ **Редактирование бюджета**\n\n"
             f"💰 **Категория:** {category_icon} {category_name}\n"
-            f"💸 **Текущая сумма:** {budget.amount:,.2f} ₽\n\n"
+            f"💸 **Текущая сумма:** {budget.amount:,.2f} {sym}\n\n"
             "Введите новую сумму бюджета (в рублях):\n\n"
             "Примеры: 5000, 10000, 15000"
         )
@@ -416,6 +425,7 @@ class BudgetHandler(BaseHandler):
         budget_id: int,
     ) -> None:
         """Показывает подтверждение удаления бюджета"""
+        sym = _money_symbol(telegram_user)
         from asgiref.sync import sync_to_async
         from budgets.models import Budget
         
@@ -444,7 +454,7 @@ class BudgetHandler(BaseHandler):
             f"🗑️ **Удаление бюджета**\n\n"
             f"Вы уверены, что хотите удалить бюджет для категории "
             f"'{category_icon} {category_name}'?\n\n"
-            f"💰 Сумма: {budget.amount:,.2f} ₽\n"
+            f"💰 Сумма: {budget.amount:,.2f} {sym}\n"
             f"📅 Период: {period_display}\n\n"
             "⚠️ Это действие нельзя отменить."
         )

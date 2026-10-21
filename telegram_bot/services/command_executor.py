@@ -17,7 +17,7 @@ from telegram_bot.utils.currency_text import (
     explicit_entry_currency,
     stash_entry_currency,
 )
-from transactions.currencies import RUB, VND
+from transactions.currencies import RUB, base_currency_of, button_label, prefs_tuple
 from transactions.formatting import format_entry_amount, format_transaction_amount
 from telegram_bot.services.voice_budget_executor import (
     find_current_month_budget_async,
@@ -45,13 +45,21 @@ class CommandExecutor:
         voice_transcript: str | None = None,
     ) -> None:
         if not parsed_command.get('currency_confirmed'):
-            currency = explicit_entry_currency(parsed_command, voice_transcript)
+            base, inputs = await sync_to_async(prefs_tuple)(telegram_user)
+            currency = explicit_entry_currency(
+                parsed_command,
+                voice_transcript,
+                allowed=inputs,
+            )
+            if not currency and len(inputs) == 1:
+                currency = inputs[0]
             if not currency:
                 await self.prompt_entry_currency(
                     update,
                     context,
                     parsed_command,
                     voice_transcript=voice_transcript,
+                    currencies=inputs,
                 )
                 return
             parsed_command = {
@@ -122,39 +130,44 @@ class CommandExecutor:
         parsed_command: dict[str, Any],
         *,
         voice_transcript: str | None = None,
+        currencies: list[str] | None = None,
     ) -> None:
-        """Спрашивает рубли или донги, если в сообщении валюты не было."""
+        """Спрашивает валюту суммы, если в сообщении её не было."""
         context.user_data[PENDING_CURRENCY_KEY] = {
             'command': parsed_command,
             'voice_transcript': voice_transcript,
         }
         amount = parsed_command.get('amount')
         label = f'{Decimal(amount):,.0f}' if amount is not None else '—'
-        keyboard = InlineKeyboardMarkup([
-            [
+        codes = currencies or [RUB]
+        rows = []
+        pair: list[InlineKeyboardButton] = []
+        for code in codes:
+            pair.append(
                 InlineKeyboardButton(
-                    '₽ Рубли',
-                    callback_data='entry_currency_RUB',
-                ),
-                InlineKeyboardButton(
-                    '₫ Донги',
-                    callback_data='entry_currency_VND',
-                ),
-            ],
-            [
-                InlineKeyboardButton(
-                    'Отмена',
-                    callback_data='entry_currency_cancel',
-                ),
-            ],
+                    button_label(code),
+                    callback_data=f'entry_currency_{code}',
+                )
+            )
+            if len(pair) == 2:
+                rows.append(pair)
+                pair = []
+        if pair:
+            rows.append(pair)
+        rows.append([
+            InlineKeyboardButton(
+                'Отмена',
+                callback_data='entry_currency_cancel',
+            ),
         ])
+        keyboard = InlineKeyboardMarkup(rows)
         query = update.callback_query
         if query is not None:
             await query.answer()
         lines = []
         if voice_transcript:
             lines.append(f'🎤 Распознано: «{voice_transcript}»')
-        lines.append(f'{label} — рубли или донги?')
+        lines.append(f'{label} — в какой валюте?')
         await context.bot.send_message(
             chat_id=update.effective_chat.id,
             text='\n'.join(lines),
@@ -188,28 +201,51 @@ class CommandExecutor:
             voice_transcript=pending.get('voice_transcript'),
         )
 
+    async def _fallback_entry_currency(self, telegram_user) -> str:
+        """Валюта, если во фразе её не было: базовая, а не зашитые рубли."""
+        return await sync_to_async(base_currency_of)(telegram_user)
+
     async def _resolve_currency(
         self,
         telegram_user,
         parsed_command: dict[str, Any],
         voice_transcript: str | None,
     ) -> str:
-        found = explicit_entry_currency(parsed_command, voice_transcript)
+        base, inputs = await sync_to_async(prefs_tuple)(telegram_user)
+        found = explicit_entry_currency(
+            parsed_command,
+            voice_transcript,
+            allowed=inputs,
+        )
         if found:
             return found
-        return RUB
+        confirmed = parsed_command.get('currency')
+        if confirmed in inputs:
+            return confirmed
+        if len(inputs) == 1:
+            return inputs[0]
+        return base
 
-    async def _store_vnd_amount_as_rub(self, command: ParsedVoiceCommand) -> None:
-        """Лимиты и цели хранятся в рублях. Донги пересчитываем перед записью."""
-        if command.currency != VND or command.amount is None:
+    async def _store_vnd_amount_as_rub(self, telegram_user, command: ParsedVoiceCommand) -> None:
+        """Лимиты и цели хранятся в базовой валюте. Чужую валюту пересчитываем."""
+        from telegram_bot.utils.currency_text import detect_currency_mention
+        from transactions.exchange import convert_magnitude
+
+        base, inputs = await sync_to_async(prefs_tuple)(telegram_user)
+        currency = command.currency
+        if currency not in inputs and currency != base:
+            currency = detect_currency_mention(command.raw_transcript)
+        if currency not in inputs and currency != base:
+            currency = None
+        if command.amount is None or not currency or currency == base:
+            if not command.currency:
+                command.currency = base
             return
-        from transactions.exchange import convert_magnitude_to_rub
-
         command.amount = await sync_to_async(
-            convert_magnitude_to_rub,
+            convert_magnitude,
             thread_sensitive=True,
-        )(command.amount)
-        command.currency = RUB
+        )(command.amount, currency, base)
+        command.currency = base
 
     async def execute_set_budget(
         self,
@@ -221,7 +257,7 @@ class CommandExecutor:
         skip_update_confirm: bool = False,
     ) -> None:
         """Create or update monthly expense budget from a voice command."""
-        await self._store_vnd_amount_as_rub(command)
+        await self._store_vnd_amount_as_rub(telegram_user, command)
 
         if command.amount is None or command.category is None:
             await self.send_error(
@@ -390,6 +426,7 @@ class CommandExecutor:
                 context.bot,
                 update.effective_chat.id,
                 [breach],
+                currency=base_currency_of(telegram_user),
             )
 
     async def execute_manage_goal(
@@ -408,7 +445,7 @@ class CommandExecutor:
             execute_goal_withdraw,
         )
 
-        await self._store_vnd_amount_as_rub(command)
+        await self._store_vnd_amount_as_rub(telegram_user, command)
 
         action = command.goal_action
         if action not in {
@@ -809,7 +846,10 @@ class CommandExecutor:
         user_state.current_amount = command.amount
         user_state.awaiting_category = True
         user_state.last_transaction_type = transaction_type
-        stash_entry_currency(user_state, command.currency or RUB)
+        stash_entry_currency(
+            user_state,
+            command.currency or await self._fallback_entry_currency(telegram_user),
+        )
         await user_state.asave()
 
         is_budget = command.intent == VoiceIntentType.SET_BUDGET
@@ -993,7 +1033,9 @@ class CommandExecutor:
             'voice_create_after': True,
             'voice_intent': command.intent.value,
             'suggested_name': suggested,
-            'entry_currency': command.currency or RUB,
+            'entry_currency': (
+                command.currency or await self._fallback_entry_currency(telegram_user)
+            ),
         }
         await user_state.asave()
 
@@ -1208,6 +1250,7 @@ class CommandExecutor:
             context.bot,
             update.effective_chat.id,
             breaches_of(transaction),
+            currency=base_currency_of(telegram_user),
         )
 
     async def send_error(
