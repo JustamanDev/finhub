@@ -749,13 +749,13 @@ class CallbackHandler(BaseHandler):
             breaches_of,
             send_budget_breaches,
         )
-        from transactions.currencies import base_currency_of
+        from transactions.currencies import RUB
 
         await send_budget_breaches(
             context.bot,
             query.message.chat_id,
             breaches_of(transaction),
-            currency=base_currency_of(telegram_user),
+            currency=transaction.report_currency or RUB,
         )
 
     async def _handle_tx_goal_list(
