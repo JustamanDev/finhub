@@ -6,7 +6,7 @@ MVP API, categories, transactions, budgets, modular settings, Docker.
 
 ## Фаза 1 — Telegram bot (done)
 
-Text input, budgets, reports, Excel, goals MVP, default categories, prod resilience.
+Text input, budgets, reports, Excel за месяц и за год, goals MVP, default categories, prod resilience.
 
 ## Фаза 2 — Voice input (done MVP)
 
@@ -24,22 +24,21 @@ Details: [voice-input.md](voice-input.md)
 
 ## Фаза 5 — Дальше
 
-Не начато. Подробности идей, которые надо сначала обсудить: [ideas.md](ideas.md).
-
-- Подписка: три тарифа, на верхнем — голос и консультант
-- Общий конверт для пары
-- Модуль долгов
-- Frontend dashboard (Next.js — в vision, не в repo)
-- Трейдинг (старая vision, не в repo)
+Не начато. Когда вернёмся к коду, первыми идут повторяющиеся операции и долги. Остальной старый план и идеи на обсуждение: [ideas.md](ideas.md).
 
 ## Приоритеты
 
-Живой продукт — учёт, отчёты, цели и конверты, голос, консультант. Новые куски не пишутся, пока идея из [ideas.md](ideas.md) не разобрана словами.
+Живой продукт — учёт, отчёты, цели и конверты, голос, консультант. Новая работа не начата.
+
+Следующие два, когда вернёмся к разработке:
+
+1. Повторяющиеся операции
+2. Долги
 
 Крупные хендлеры бота по-прежнему стоит резать, когда их снова трогают.
 
 ## Out of scope (пока)
 
-- Multi-currency сверх рубля и донга
 - Bank sync / Open Banking
 - Mobile native apps
+- Celery, пока его явно не попросят

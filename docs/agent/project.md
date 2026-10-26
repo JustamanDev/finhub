@@ -28,7 +28,7 @@
 | `telegram_bot` | `TelegramUser` (`base_currency`, `input_currencies`), `UserState`, `BotText`, handlers, services |
 | `api` | URL routing v1 |
 
-**Не реализовано:** `accounts`, `debts`, `trading`, `analytics`, frontend.
+**Не реализовано:** приложения `accounts`, `debts`, `trading`, `analytics` и фронтенд. Следующие по очереди, когда вернёмся к коду: повторяющиеся операции и долги. Список: [ideas.md](ideas.md).
 
 ## Entry points
 

@@ -70,14 +70,24 @@ class ReportKeyboard:
         keyboard.append(nav_buttons)
         
         # Действия для текущего периода
+        year = current_period['year']
+        month = current_period['month']
         keyboard.append(
             [
                 InlineKeyboardButton(
-                    text="📥 Excel",
-                    callback_data=f"report_export_excel_{current_period['year']}_{current_period['month']}",
+                    text="Файл за месяц",
+                    callback_data=f"report_export_excel_{year}_{month}",
                 ),
                 InlineKeyboardButton(
-                    text="📋 К отчетам",
+                    text="Файл за год",
+                    callback_data=f"report_export_year_{year}",
+                ),
+            ]
+        )
+        keyboard.append(
+            [
+                InlineKeyboardButton(
+                    text="К отчётам",
                     callback_data="show_report",
                 ),
             ]
@@ -101,20 +111,24 @@ class ReportKeyboard:
         keyboard = [
             [
                 InlineKeyboardButton(
-                    text="📊 Текущий месяц",
-                    callback_data="report_current"
+                    text="Этот месяц",
+                    callback_data="report_current",
                 )
             ],
             [
                 InlineKeyboardButton(
-                    text="📥 Excel (текущий месяц)",
+                    text="Файл за месяц",
                     callback_data="report_export_excel_current",
-                )
+                ),
+                InlineKeyboardButton(
+                    text="Файл за год",
+                    callback_data="report_export_year_current",
+                ),
             ],
             [
                 InlineKeyboardButton(
-                    text="📈 Все отчеты",
-                    callback_data="report_all"
+                    text="Другие месяцы",
+                    callback_data="report_all",
                 )
             ],
             [
