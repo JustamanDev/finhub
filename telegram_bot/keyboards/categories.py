@@ -27,26 +27,18 @@ class CategoryKeyboard:
     async def get_categories_keyboard(
         self,
         transaction_type: str,
-        page: int = 0,
+        _page: int = 0,
     ) -> InlineKeyboardMarkup:
-        """
-        Создает клавиатуру с категориями
-        
-        Args:
-            transaction_type: 'expense' или 'income'
-            page: Номер страницы (для пагинации)
-            
-        Returns:
-            InlineKeyboardMarkup с кнопками категорий
+        """Все активные категории этого типа, по две в ряд.
+
+        Номер страницы оставлен для старых кнопок листания: список больше не режется.
         """
         categories = await self._get_user_categories(transaction_type)
-        start = page * self.MAX_CATEGORIES_PER_PAGE
-        page_categories = categories[start:start + self.MAX_CATEGORIES_PER_PAGE]
 
         buttons = []
-        for i in range(0, len(page_categories), self.MAX_COLUMNS):
+        for i in range(0, len(categories), self.MAX_COLUMNS):
             row = []
-            for category in page_categories[i:i + self.MAX_COLUMNS]:
+            for category in categories[i:i + self.MAX_COLUMNS]:
                 button = InlineKeyboardButton(
                     text=f"{category.icon} {category.name}",
                     callback_data=f"category_{category.id}",
@@ -54,15 +46,9 @@ class CategoryKeyboard:
                 row.append(button)
             buttons.append(row)
 
-        navigation = await self._get_navigation_buttons(
-            transaction_type,
-            page,
-            len(categories),
-        )
-        buttons.extend(navigation)
         buttons.append([
             InlineKeyboardButton(
-                text="⭐ К частым",
+                text="⭐ Назад",
                 callback_data=f"quick_back_{transaction_type}",
             ),
         ])

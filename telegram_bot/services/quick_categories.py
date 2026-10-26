@@ -100,7 +100,7 @@ def toggle_quick(user: User, category_id: int) -> tuple[Category | None, str | N
         is_quick=True,
     ).count()
     if taken >= QUICK_MENU_SIZE:
-        return category, 'В меню уже шесть. Снимите одну, чтобы поставить эту.'
+        return category, 'В избранных уже шесть. Снимите одну, чтобы поставить эту.'
 
     category.is_quick = True
     category.save(update_fields=['is_quick', 'updated_at'])
