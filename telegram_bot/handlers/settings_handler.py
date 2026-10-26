@@ -51,7 +51,7 @@ class SettingsHandler(BaseHandler):
             "Выберите действие:\n"
             "• ➕ Добавить категорию - создать новую\n"
             "• 📝 Редактировать - изменить существующие\n"
-            "• ⭐ В меню ввода - шесть категорий после суммы\n"
+            "• ⭐ Выбрать избранные - шесть категорий после суммы\n"
             "• 📦 Архив - спрятать категорию из меню, операции останутся в отчётах"
         )
         
@@ -1237,7 +1237,7 @@ class SettingsHandler(BaseHandler):
             extra = ""
             if dropped:
                 kind = "доходов" if new_type == "income" else "расходов"
-                extra = f"\n\nИз меню ввода её убрал: там уже шесть {kind}."
+                extra = f"\n\nИз избранных её убрал: там уже шесть {kind}."
             message = (
                 f"✅ **Тип категории изменен!**\n\n"
                 f"Категория: {category.icon} {category.name}\n"
@@ -1468,7 +1468,7 @@ class SettingsHandler(BaseHandler):
         """Экран, где выбирают, какие категории стоят в меню после суммы."""
         keyboard = SettingsKeyboard.get_quick_type_keyboard()
         message = (
-            "⭐ **В меню ввода**\n\n"
+            "⭐ **Избранные категории**\n\n"
             "После суммы бот показывает шесть категорий. "
             "Доходы и расходы отмечаются отдельно.\n\n"
             "Если ничего не отмечать, наверху будут те, "
@@ -1508,7 +1508,7 @@ class SettingsHandler(BaseHandler):
                 "Пока ничего не отмечено — бот сам поставит "
                 "шесть частых за месяц."
             )
-        message = f"⭐ **{type_name} в меню ввода**\n\n{hint}"
+        message = f"⭐ **Избранные: {type_name.lower()}**\n\n{hint}"
         keyboard = SettingsKeyboard.get_quick_picker_keyboard(
             categories,
             transaction_type,

@@ -130,7 +130,7 @@ class QuickCategoryMenuTests(TestCase):
 
         category, error = toggle_quick(self.user, self.categories['Ягоды'].id)
 
-        self.assertEqual(error, 'В меню уже шесть. Снимите одну, чтобы поставить эту.')
+        self.assertEqual(error, 'В избранных уже шесть. Снимите одну, чтобы поставить эту.')
         category.refresh_from_db()
         self.assertFalse(category.is_quick)
         self.assertEqual(
@@ -211,7 +211,7 @@ class QuickCategoryMenuTests(TestCase):
         self.assertNotIn('📋 Все категории', labels)
         self.assertIn('• Еда', labels)
 
-    def test_full_list_is_paged_and_can_return(self):
+    def test_full_list_shows_every_category_in_two_columns(self):
         for index in range(4):
             Category.objects.create(
                 user=self.user,
@@ -222,16 +222,18 @@ class QuickCategoryMenuTests(TestCase):
         telegram_user = TelegramUser.objects.create(user=self.user, telegram_id=503)
         keyboard = CategoryKeyboard(telegram_user)
 
-        first = async_to_sync(keyboard.get_categories_keyboard)('expense', 0)
-        callbacks = [
-            button.callback_data
-            for row in first.inline_keyboard
-            for button in row
+        markup = async_to_sync(keyboard.get_categories_keyboard)('expense', 0)
+        rows = markup.inline_keyboard
+        callbacks = [button.callback_data for row in rows for button in row]
+        category_rows = [
+            row for row in rows
+            if row[0].callback_data.startswith('category_')
         ]
 
-        self.assertIn('page_expense_1', callbacks)
+        self.assertNotIn('page_expense_1', callbacks)
         self.assertIn('quick_back_expense', callbacks)
-        self.assertLessEqual(
+        self.assertEqual(
             sum(1 for callback in callbacks if callback.startswith('category_')),
-            10,
+            12,
         )
+        self.assertTrue(all(len(row) == 2 for row in category_rows))

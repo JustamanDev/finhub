@@ -53,7 +53,7 @@ class SettingsKeyboard:
             ],
             [
                 InlineKeyboardButton(
-                    text="⭐ В меню ввода",
+                    text="⭐ Выбрать избранные",
                     callback_data="category_quick"
                 ),
             ],
