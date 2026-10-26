@@ -40,10 +40,11 @@ class ReportHandler(BaseHandler):
         keyboard = ReportKeyboard.get_report_main_keyboard()
         
         message = (
-            "📈 **Отчеты FinHub**\n\n"
-            "Выберите тип отчета:\n"
-            "• 📊 Текущий месяц - детальный отчет за текущий месяц\n"
-            "• 📈 Все отчеты - навигация по всем периодам"
+            "Отчёты\n\n"
+            "Этот месяц — сводка в чате.\n"
+            "Файл за месяц — Excel этого месяца.\n"
+            "Файл за год — Excel всего года.\n"
+            "Другие месяцы — листать прошлые периоды."
         )
         
         await send_or_edit_message(
@@ -51,7 +52,6 @@ class ReportHandler(BaseHandler):
             context,
             text=message,
             reply_markup=keyboard,
-            parse_mode='Markdown',
         )
     
     async def handle_current_report(
@@ -97,33 +97,54 @@ class ReportHandler(BaseHandler):
         year: int,
         month: int,
     ) -> None:
-        """
-        Генерирует и отправляет Excel-файл за указанный месяц.
+        """Файл месяца отдельным сообщением, сводка в чате остаётся на экране."""
+        await self._send_excel(
+            update,
+            context,
+            telegram_user,
+            lambda service: service.build_monthly_excel(year, month),
+        )
 
-        UX:
-        - не редактируем текущее сообщение с отчетом
-        - отправляем файл отдельным сообщением, чтобы отчет оставался на экране
-        """
+    async def handle_export_excel_year(
+        self,
+        update: Update | CallbackQuery,
+        context: ContextTypes.DEFAULT_TYPE,
+        telegram_user,
+        year: int,
+    ) -> None:
+        """Файл календарного года отдельным сообщением."""
+        await self._send_excel(
+            update,
+            context,
+            telegram_user,
+            lambda service: service.build_yearly_excel(year),
+        )
+
+    async def _send_excel(
+        self,
+        update: Update | CallbackQuery,
+        context: ContextTypes.DEFAULT_TYPE,
+        telegram_user,
+        build,
+    ) -> None:
         try:
             user = await sync_to_async(lambda: telegram_user.user)()
             export_service = ReportExportService(user)
 
             chat_id = None
-            # CallbackQuery (чаще всего экспорт вызывается именно так)
-            if hasattr(update, "answer"):
-                await update.answer("Готовлю Excel…")
-                if getattr(update, "message", None):
+            if hasattr(update, 'answer'):
+                await update.answer('Готовлю файл…')
+                if getattr(update, 'message', None):
                     chat_id = update.message.chat_id
 
-            # Обычное сообщение/Update
-            if chat_id is None and hasattr(update, "effective_chat") and update.effective_chat:
+            if chat_id is None and hasattr(update, 'effective_chat') and update.effective_chat:
                 chat_id = update.effective_chat.id
 
             if chat_id is None:
-                raise RuntimeError("Не удалось определить chat_id для отправки Excel")
+                raise RuntimeError('Не удалось определить chat_id для отправки Excel')
 
             await context.bot.send_chat_action(chat_id=chat_id, action=ChatAction.UPLOAD_DOCUMENT)
-            result = await export_service.build_monthly_excel(year, month)
+            result = await build(export_service)
 
             buf = io.BytesIO(result.content)
             buf.name = result.filename
@@ -131,17 +152,16 @@ class ReportHandler(BaseHandler):
             await context.bot.send_document(
                 chat_id=chat_id,
                 document=buf,
-                caption=f"📥 Excel-отчет за {month:02d}.{year}",
+                caption=result.caption,
             )
         except Exception:
-            logger.exception("Ошибка экспорта Excel")
-            # Пытаемся показать ошибку пользователю максимально мягко
-            if hasattr(update, "message") and getattr(update, "message", None):
-                await update.message.reply_text("❌ Не удалось сформировать Excel. Попробуйте позже.")
-            elif hasattr(update, "edit_message_text"):
+            logger.exception('Ошибка экспорта Excel')
+            if hasattr(update, 'message') and getattr(update, 'message', None):
+                await update.message.reply_text('Не удалось сформировать файл. Попробуйте позже.')
+            elif hasattr(update, 'edit_message_text'):
                 await safe_edit_message_text(
                     update,
-                    text="❌ Не удалось сформировать Excel. Попробуйте позже.",
+                    text='Не удалось сформировать файл. Попробуйте позже.',
                 )
     
     async def _show_monthly_report(

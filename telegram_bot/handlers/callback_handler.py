@@ -473,9 +473,15 @@ class CallbackHandler(BaseHandler):
             elif query.data == "report_export_excel_current":
                 logger.info("Вызываем _handle_report_export_excel_current")
                 await self._handle_report_export_excel_current(query, context, telegram_user)
+            elif query.data == "report_export_year_current":
+                logger.info("Вызываем _handle_report_export_year_current")
+                await self._handle_report_export_year_current(query, context, telegram_user)
             elif query.data.startswith("report_export_excel_"):
                 logger.info("Вызываем _handle_report_export_excel_period")
                 await self._handle_report_export_excel_period(query, context, telegram_user)
+            elif query.data.startswith("report_export_year_"):
+                logger.info("Вызываем _handle_report_export_year")
+                await self._handle_report_export_year(query, context, telegram_user)
             elif query.data.startswith("report_prev_"):
                 logger.info("Вызываем _handle_report_navigation")
                 await self._handle_report_navigation(query, context, telegram_user)
@@ -2034,6 +2040,48 @@ class CallbackHandler(BaseHandler):
             telegram_user,
             today.year,
             today.month,
+        )
+
+    async def _handle_report_export_year_current(
+        self,
+        query: CallbackQuery,
+        context: ContextTypes.DEFAULT_TYPE,
+        telegram_user,
+    ) -> None:
+        """Excel за календарный год сегодняшнего дня во Вьетнаме."""
+        from telegram_bot.handlers.report_handler import ReportHandler
+        from telegram_bot.services.weekly_digest import vietnam_today
+
+        today = vietnam_today()
+        report_handler = ReportHandler()
+        await report_handler.handle_export_excel_year(
+            query,
+            context,
+            telegram_user,
+            today.year,
+        )
+
+    async def _handle_report_export_year(
+        self,
+        query: CallbackQuery,
+        context: ContextTypes.DEFAULT_TYPE,
+        telegram_user,
+    ) -> None:
+        """Excel за год открытого периода."""
+        from telegram_bot.handlers.report_handler import ReportHandler
+
+        year_text = query.data.removeprefix('report_export_year_')
+        try:
+            year = int(year_text)
+        except ValueError:
+            await query.answer('Ошибка: неверный год для экспорта')
+            return
+        report_handler = ReportHandler()
+        await report_handler.handle_export_excel_year(
+            query,
+            context,
+            telegram_user,
+            year,
         )
 
     async def _handle_report_export_excel_period(
