@@ -160,6 +160,20 @@ class CategoryManagementService:
 
         category.is_active = True
         update_fields = ['is_active', 'updated_at']
+        if category.is_quick:
+            from telegram_bot.services.quick_categories import QUICK_MENU_SIZE
+
+            taken = await sync_to_async(
+                lambda: Category.objects.filter(
+                    user=self.user,
+                    type=category.type,
+                    is_active=True,
+                    is_quick=True,
+                ).count(),
+            )()
+            if taken >= QUICK_MENU_SIZE:
+                category.is_quick = False
+                update_fields.append('is_quick')
         if icon:
             category.icon = icon
             update_fields.append('icon')
