@@ -14,11 +14,13 @@ class CategoryAdmin(admin.ModelAdmin):
         'icon',
         'user',
         'is_active',
+        'is_quick',
         'created_at',
     ]
     list_filter = [
         'type',
         'is_active',
+        'is_quick',
         'created_at',
     ]
     search_fields = [
@@ -35,7 +37,7 @@ class CategoryAdmin(admin.ModelAdmin):
     
     fieldsets = (
         ('Основная информация', {
-            'fields': ('name', 'type', 'color', 'icon', 'is_active')
+            'fields': ('name', 'type', 'color', 'icon', 'is_active', 'is_quick')
         }),
         ('Системная информация', {
             'fields': ('created_at', 'updated_at'),

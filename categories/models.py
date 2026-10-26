@@ -18,6 +18,7 @@ class Category(TimestampedModel):
         icon: Эмодзи иконка категории
         user: Владелец категории
         is_active: Активна ли категория
+        is_quick: Стоит ли в коротком меню ввода, если человек выбрал категории сам
     """
     INCOME = 'income'
     EXPENSE = 'expense'
@@ -32,6 +33,11 @@ class Category(TimestampedModel):
     icon = models.CharField('Иконка', max_length=50, default='💰')
     user = models.ForeignKey(User, on_delete=models.CASCADE, related_name='categories', verbose_name='Пользователь')
     is_active = models.BooleanField('Активна', default=True)
+    is_quick = models.BooleanField(
+        'В меню ввода',
+        default=False,
+        help_text='Если отмечена хотя бы одна категория этого типа, короткое меню показывает только отмеченные. Иначе бот берёт шесть самых частых за 30 дней.',
+    )
     
     class Meta:
         verbose_name = 'Категория'

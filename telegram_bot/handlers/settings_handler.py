@@ -51,6 +51,7 @@ class SettingsHandler(BaseHandler):
             "Выберите действие:\n"
             "• ➕ Добавить категорию - создать новую\n"
             "• 📝 Редактировать - изменить существующие\n"
+            "• ⭐ В меню ввода - шесть категорий после суммы\n"
             "• 📦 Архив - спрятать категорию из меню, операции останутся в отчётах"
         )
         
@@ -1222,15 +1223,26 @@ class SettingsHandler(BaseHandler):
                 )
                 return
             
-            # Изменяем тип
+            from telegram_bot.services.quick_categories import drop_quick_if_type_is_full
+
+            dropped = await sync_to_async(drop_quick_if_type_is_full)(
+                user,
+                category,
+                new_type,
+            )
             category.type = new_type
             await category_service.save_category(category)
-            
+
             type_name = "доход" if new_type == "income" else "расход"
+            extra = ""
+            if dropped:
+                kind = "доходов" if new_type == "income" else "расходов"
+                extra = f"\n\nИз меню ввода её убрал: там уже шесть {kind}."
             message = (
                 f"✅ **Тип категории изменен!**\n\n"
                 f"Категория: {category.icon} {category.name}\n"
                 f"Новый тип: {type_name.capitalize()}"
+                f"{extra}"
             )
             
             keyboard = [
@@ -1447,6 +1459,108 @@ class SettingsHandler(BaseHandler):
             parse_mode='Markdown',
         )
     
+    async def handle_quick_categories(
+        self,
+        update: Update | CallbackQuery,
+        context: ContextTypes.DEFAULT_TYPE,
+        telegram_user,
+    ) -> None:
+        """Экран, где выбирают, какие категории стоят в меню после суммы."""
+        keyboard = SettingsKeyboard.get_quick_type_keyboard()
+        message = (
+            "⭐ **В меню ввода**\n\n"
+            "После суммы бот показывает шесть категорий. "
+            "Доходы и расходы отмечаются отдельно.\n\n"
+            "Если ничего не отмечать, наверху будут те, "
+            "которыми вы чаще пользовались за последний месяц."
+        )
+        await self._send_or_edit_message(update, context, message, keyboard)
+
+    async def handle_quick_category_picker(
+        self,
+        update: Update | CallbackQuery,
+        context: ContextTypes.DEFAULT_TYPE,
+        telegram_user,
+        transaction_type: str,
+    ) -> None:
+        """Список категорий одного типа с отметками меню ввода."""
+        from categories.models import Category
+
+        user = await sync_to_async(lambda: telegram_user.user)()
+        categories = await sync_to_async(list)(
+            Category.objects.filter(
+                user=user,
+                type=transaction_type,
+                is_active=True,
+            ).order_by('name'),
+        )
+        picked = sum(1 for category in categories if category.is_quick)
+        type_name = "Расходы" if transaction_type == "expense" else "Доходы"
+        if not categories:
+            hint = "Сначала добавьте категорию — отмечать пока нечего."
+        elif picked:
+            hint = (
+                f"Отмечено {picked} из 6.\n"
+                "Нажмите категорию, чтобы добавить или убрать."
+            )
+        else:
+            hint = (
+                "Пока ничего не отмечено — бот сам поставит "
+                "шесть частых за месяц."
+            )
+        message = f"⭐ **{type_name} в меню ввода**\n\n{hint}"
+        keyboard = SettingsKeyboard.get_quick_picker_keyboard(
+            categories,
+            transaction_type,
+            has_manual=picked > 0,
+        )
+        await self._send_or_edit_message(update, context, message, keyboard)
+
+    async def handle_quick_category_toggle(
+        self,
+        update: Update | CallbackQuery,
+        context: ContextTypes.DEFAULT_TYPE,
+        telegram_user,
+        category_id: int,
+    ) -> None:
+        """Переключает одну категорию в меню ввода и обновляет список."""
+        from telegram_bot.services.quick_categories import toggle_quick
+
+        user = await sync_to_async(lambda: telegram_user.user)()
+        category, error = await sync_to_async(toggle_quick)(user, category_id)
+        if error and hasattr(update, 'answer'):
+            await update.answer(error, show_alert=True)
+            if category is None:
+                return
+        elif category is None:
+            await self._send_error_message(update, context, error or "Категория не найдена")
+            return
+        await self.handle_quick_category_picker(
+            update,
+            context,
+            telegram_user,
+            category.type,
+        )
+
+    async def handle_quick_category_clear(
+        self,
+        update: Update | CallbackQuery,
+        context: ContextTypes.DEFAULT_TYPE,
+        telegram_user,
+        transaction_type: str,
+    ) -> None:
+        """Снимает ручные отметки, меню снова собирается по частоте."""
+        from telegram_bot.services.quick_categories import clear_quick
+
+        user = await sync_to_async(lambda: telegram_user.user)()
+        await sync_to_async(clear_quick)(user, transaction_type)
+        await self.handle_quick_category_picker(
+            update,
+            context,
+            telegram_user,
+            transaction_type,
+        )
+
     async def _send_error_message(
         self,
         update: Update | CallbackQuery,

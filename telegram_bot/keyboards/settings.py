@@ -53,6 +53,12 @@ class SettingsKeyboard:
             ],
             [
                 InlineKeyboardButton(
+                    text="⭐ В меню ввода",
+                    callback_data="category_quick"
+                ),
+            ],
+            [
+                InlineKeyboardButton(
                     text="📦 Архив",
                     callback_data="category_archive"
                 ),
@@ -306,4 +312,59 @@ class SettingsKeyboard:
             ),
         ])
         
-        return InlineKeyboardMarkup(keyboard) 
+        return InlineKeyboardMarkup(keyboard)
+
+    @staticmethod
+    def get_quick_type_keyboard() -> InlineKeyboardMarkup:
+        """Доходы и расходы для ручного выбора меню ввода."""
+        keyboard = [
+            [
+                InlineKeyboardButton(
+                    text="💸 Расходы",
+                    callback_data="category_quick_expense",
+                ),
+                InlineKeyboardButton(
+                    text="💰 Доходы",
+                    callback_data="category_quick_income",
+                ),
+            ],
+            [
+                InlineKeyboardButton(
+                    text="🔙 Назад",
+                    callback_data="settings_categories",
+                ),
+            ],
+        ]
+        return InlineKeyboardMarkup(keyboard)
+
+    @staticmethod
+    def get_quick_picker_keyboard(
+        categories: List,
+        transaction_type: str,
+        *,
+        has_manual: bool,
+    ) -> InlineKeyboardMarkup:
+        """Список категорий с отметкой, кто стоит в коротком меню."""
+        keyboard = []
+        for category in categories:
+            mark = "✅ " if category.is_quick else ""
+            keyboard.append([
+                InlineKeyboardButton(
+                    text=f"{mark}{category.icon} {category.name}",
+                    callback_data=f"category_quick_toggle_{category.id}",
+                ),
+            ])
+        if has_manual:
+            keyboard.append([
+                InlineKeyboardButton(
+                    text="Пусть бот выбирает сам",
+                    callback_data=f"category_quick_clear_{transaction_type}",
+                ),
+            ])
+        keyboard.append([
+            InlineKeyboardButton(
+                text="🔙 Назад",
+                callback_data="category_quick",
+            ),
+        ])
+        return InlineKeyboardMarkup(keyboard)

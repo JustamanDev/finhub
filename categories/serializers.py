@@ -15,6 +15,7 @@ class CategorySerializer(serializers.ModelSerializer):
             'color',
             'icon',
             'is_active',
+            'is_quick',
             'created_at',
             'transactions_count',
             'budget_info',

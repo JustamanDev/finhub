@@ -253,6 +253,12 @@ class CallbackHandler(BaseHandler):
                     goal_id,
                     amount,
                 )
+            elif query.data.startswith('all_categories_'):
+                await self._handle_all_categories(query, context, telegram_user)
+            elif query.data.startswith('page_'):
+                await self._handle_page_navigation(query, context, telegram_user)
+            elif query.data.startswith('quick_back_'):
+                await self._handle_quick_back(query, context, telegram_user)
             elif query.data in ('switch_to_income', 'switch_to_expense'):
                 # Переключение типа транзакции (расход/доход)
                 await self._handle_type_switch(
@@ -389,6 +395,40 @@ class CallbackHandler(BaseHandler):
                     context,
                     telegram_user,
                 )
+            elif query.data == "category_quick":
+                await self._settings_handler().handle_quick_categories(
+                    query, context, telegram_user,
+                )
+            elif query.data.startswith("category_quick_clear_"):
+                await self._settings_handler().handle_quick_category_clear(
+                    query,
+                    context,
+                    telegram_user,
+                    query.data.removeprefix("category_quick_clear_"),
+                )
+            elif query.data.startswith("category_quick_toggle_"):
+                try:
+                    category_id = int(query.data.removeprefix("category_quick_toggle_"))
+                except ValueError:
+                    await query.answer("Категория не найдена")
+                else:
+                    await self._settings_handler().handle_quick_category_toggle(
+                        query,
+                        context,
+                        telegram_user,
+                        category_id,
+                    )
+            elif query.data.startswith("category_quick_"):
+                transaction_type = query.data.removeprefix("category_quick_")
+                if transaction_type not in ("income", "expense"):
+                    await query.answer("Неизвестный тип")
+                else:
+                    await self._settings_handler().handle_quick_category_picker(
+                        query,
+                        context,
+                        telegram_user,
+                        transaction_type,
+                    )
             elif query.data == "category_add":
                 logger.info("Вызываем _handle_category_add")
                 await self._handle_category_add(query, context, telegram_user)
@@ -627,40 +667,12 @@ class CallbackHandler(BaseHandler):
     ) -> None:
         """Обрабатывает переключение типа транзакции"""
         new_type = query.data.split('_')[2]  # switch_to_expense -> expense
-        
-        # Получаем состояние
-        user_state = await self.get_user_state(telegram_user)
-        
-        if user_state.current_amount:
-            # Обновляем клавиатуру с новым типом
-            keyboard_generator = CategoryKeyboard(telegram_user)
-            keyboard = await keyboard_generator.get_frequent_categories_keyboard(
-                new_type
-            )
-            
-            from telegram_bot.utils.currency_text import read_entry_currency
-            from transactions.formatting import format_entry_amount
-
-            transaction_emoji = "💸" if new_type == "expense" else "💰"
-            type_name = "расход" if new_type == "expense" else "доход"
-            amount_label = format_entry_amount(
-                user_state.current_amount,
-                read_entry_currency(user_state),
-            )
-            
-            message = (
-                f"{transaction_emoji} {amount_label} - "
-                f"выбери категорию ({type_name}):"
-            )
-            
-            await safe_edit_message_text(query,
-                text=message,
-                reply_markup=keyboard,
-            )
-        else:
-            await safe_edit_message_text(query,
-                text="❌ Сначала укажите сумму",
-            )
+        await self._show_category_menu(
+            query,
+            telegram_user,
+            new_type,
+            full_list=False,
+        )
     
     async def _handle_page_navigation(
         self,
@@ -682,6 +694,62 @@ class CallbackHandler(BaseHandler):
         
         await query.edit_message_reply_markup(reply_markup=keyboard)
     
+    async def _handle_quick_back(
+        self,
+        query: CallbackQuery,
+        context: ContextTypes.DEFAULT_TYPE,
+        telegram_user,
+    ) -> None:
+        """Возвращает короткое меню из полного списка категорий."""
+        transaction_type = query.data.removeprefix('quick_back_')
+        await self._show_category_menu(
+            query,
+            telegram_user,
+            transaction_type,
+            full_list=False,
+        )
+
+    async def _show_category_menu(
+        self,
+        query: CallbackQuery,
+        telegram_user,
+        transaction_type: str,
+        *,
+        full_list: bool,
+    ) -> None:
+        """Короткое или полное меню категорий для уже введённой суммы."""
+        user_state = await self.get_user_state(telegram_user)
+        if not user_state.current_amount:
+            await safe_edit_message_text(query, text="❌ Сначала укажите сумму")
+            return
+
+        from telegram_bot.utils.currency_text import read_entry_currency
+        from transactions.formatting import format_entry_amount
+
+        keyboard_generator = CategoryKeyboard(telegram_user)
+        if full_list:
+            keyboard = await keyboard_generator.get_categories_keyboard(transaction_type)
+            choice = "все категории"
+        else:
+            keyboard = await keyboard_generator.get_frequent_categories_keyboard(
+                transaction_type,
+            )
+            choice = "выбери категорию"
+        transaction_emoji = "💸" if transaction_type == "expense" else "💰"
+        type_name = "расход" if transaction_type == "expense" else "доход"
+        amount_label = format_entry_amount(
+            user_state.current_amount,
+            read_entry_currency(user_state),
+        )
+        await safe_edit_message_text(
+            query,
+            text=(
+                f"{transaction_emoji} {amount_label} - "
+                f"{choice} ({type_name}):"
+            ),
+            reply_markup=keyboard,
+        )
+
     async def _handle_all_categories(
         self,
         query: CallbackQuery,
@@ -690,32 +758,11 @@ class CallbackHandler(BaseHandler):
     ) -> None:
         """Показывает все категории"""
         transaction_type = query.data.split('_')[2]
-        
-        keyboard_generator = CategoryKeyboard(telegram_user)
-        keyboard = await keyboard_generator.get_categories_keyboard(
+        await self._show_category_menu(
+            query,
+            telegram_user,
             transaction_type,
-            page=0,
-        )
-        
-        from telegram_bot.utils.currency_text import read_entry_currency
-        from transactions.formatting import format_entry_amount
-
-        user_state = await self.get_user_state(telegram_user)
-        transaction_emoji = "💸" if transaction_type == "expense" else "💰"
-        type_name = "расход" if transaction_type == "expense" else "доход"
-        amount_label = format_entry_amount(
-            user_state.current_amount,
-            read_entry_currency(user_state),
-        )
-        
-        message = (
-            f"{transaction_emoji} {amount_label} - "
-            f"все категории ({type_name}):"
-        )
-        
-        await safe_edit_message_text(query,
-            text=message,
-            reply_markup=keyboard,
+            full_list=True,
         )
     
     async def _send_transaction_confirmation(

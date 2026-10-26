@@ -7,6 +7,8 @@ from telegram import (
 from asgiref.sync import sync_to_async
 
 from telegram_bot.models import TelegramUser
+from telegram_bot.services.quick_categories import select_quick_categories
+from telegram_bot.services.weekly_digest import vietnam_today
 from categories.models import Category
 
 logger = logging.getLogger(__name__)
@@ -38,10 +40,9 @@ class CategoryKeyboard:
             InlineKeyboardMarkup с кнопками категорий
         """
         categories = await self._get_user_categories(transaction_type)
-        # Временно отключаем пагинацию и показываем все категории
-        page_categories = categories
-        
-        # Создаем кнопки категорий
+        start = page * self.MAX_CATEGORIES_PER_PAGE
+        page_categories = categories[start:start + self.MAX_CATEGORIES_PER_PAGE]
+
         buttons = []
         for i in range(0, len(page_categories), self.MAX_COLUMNS):
             row = []
@@ -52,8 +53,20 @@ class CategoryKeyboard:
                 )
                 row.append(button)
             buttons.append(row)
-        
-        # Кнопка переключения типа транзакции
+
+        navigation = await self._get_navigation_buttons(
+            transaction_type,
+            page,
+            len(categories),
+        )
+        buttons.extend(navigation)
+        buttons.append([
+            InlineKeyboardButton(
+                text="⭐ К частым",
+                callback_data=f"quick_back_{transaction_type}",
+            ),
+        ])
+
         switch_button = await self._get_switch_button(transaction_type)
         buttons.append([switch_button])
         
@@ -71,15 +84,46 @@ class CategoryKeyboard:
         transaction_type: str,
     ) -> InlineKeyboardMarkup:
         """
-        Ранее здесь показывались «часто используемые» категории и кнопка
-        «Все категории». Сейчас по UX‑требованию всегда показываем
-        полный список категорий без пагинации.
+        Шесть категорий: отмеченные в настройках или самые частые за 30 дней.
+        Остальные открываются кнопкой «Все категории».
         """
-        return await self.get_categories_keyboard(
-            transaction_type=transaction_type,
-            page=0,
+        if self.user is None:
+            self.user = await sync_to_async(lambda: self.telegram_user.user)()
+
+        menu = await sync_to_async(select_quick_categories)(
+            self.user,
+            transaction_type,
+            vietnam_today(),
         )
-    
+
+        buttons = []
+        for i in range(0, len(menu.categories), self.MAX_COLUMNS):
+            row = []
+            for category in menu.categories[i:i + self.MAX_COLUMNS]:
+                row.append(InlineKeyboardButton(
+                    text=f"{category.icon} {category.name}",
+                    callback_data=f"category_{category.id}",
+                ))
+            buttons.append(row)
+
+        if menu.total_active > len(menu.categories):
+            buttons.append([
+                InlineKeyboardButton(
+                    text="📋 Все категории",
+                    callback_data=f"all_categories_{transaction_type}",
+                ),
+            ])
+
+        switch_button = await self._get_switch_button(transaction_type)
+        buttons.append([switch_button])
+        buttons.append([
+            InlineKeyboardButton(
+                text="🏠 Главное меню",
+                callback_data="main_menu",
+            ),
+        ])
+        return InlineKeyboardMarkup(buttons)
+
     async def _get_user_categories(self, transaction_type: str) -> List[Category]:
         """
         Получает категории пользователя по типу
