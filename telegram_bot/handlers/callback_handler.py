@@ -131,6 +131,14 @@ class CallbackHandler(BaseHandler):
                     context,
                     telegram_user,
                 )
+            elif query.data == 'recur_menu' or query.data.startswith('recur_'):
+                from telegram_bot.handlers.recurring_handler import RecurringHandler
+
+                await RecurringHandler().handle_callback(query, context, telegram_user)
+            elif query.data == 'debts_menu' or query.data.startswith('debt_'):
+                from telegram_bot.handlers.debts_handler import DebtsHandler
+
+                await DebtsHandler().handle_callback(query, context, telegram_user)
             elif query.data == 'goals_menu':
                 await self._handle_goals_menu(
                     query,

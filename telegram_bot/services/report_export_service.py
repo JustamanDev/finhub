@@ -68,9 +68,10 @@ class ReportExportService:
             goals=source.goals,
             budgets=source.budgets,
         )
+        recurring_rows, debt_rows = await sync_to_async(self._side_rows)(today)
         return ExcelExportResult(
             filename=f'finhub_{year}-{month:02d}.xlsx',
-            content=render_month_workbook(report),
+            content=render_month_workbook(report, recurring_rows, debt_rows),
             caption=period_caption(year, month),
         )
 
@@ -94,10 +95,20 @@ class ReportExportService:
             goals=source.goals,
             budgets=source.budgets,
         )
+        recurring_rows, debt_rows = await sync_to_async(self._side_rows)(today)
         return ExcelExportResult(
             filename=f'finhub_{year}.xlsx',
-            content=render_year_workbook(report),
+            content=render_year_workbook(report, recurring_rows, debt_rows),
             caption=year_caption(year),
+        )
+
+    def _side_rows(self, today: date) -> tuple[tuple[str, ...], tuple[str, ...]]:
+        from debts.ledger import obligation_lines
+        from recurring.rhythm import expectation_lines
+
+        return (
+            tuple(expectation_lines(self.user, today)),
+            tuple(obligation_lines(self.user)),
         )
 
     async def _load(self, start: date, end: date) -> '_Source':
