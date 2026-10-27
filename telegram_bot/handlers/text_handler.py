@@ -640,6 +640,18 @@ class TextHandler(BaseHandler):
             # Проверяем, ожидается ли создание категории
             user_state = await self.get_user_state(telegram_user)
 
+            from telegram_bot.handlers.recurring_handler import RecurringHandler
+            from telegram_bot.handlers.debts_handler import DebtsHandler
+
+            if await RecurringHandler().maybe_text(
+                update, context, telegram_user, message_text,
+            ):
+                return
+            if await DebtsHandler().maybe_text(
+                update, context, telegram_user, message_text,
+            ):
+                return
+
             if user_state.awaiting_category_creation:
                 await self._handle_category_creation(
                     update,

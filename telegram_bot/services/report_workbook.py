@@ -58,22 +58,46 @@ READING = (
 )
 
 
-def render_month_workbook(report: MonthReport) -> bytes:
+def render_month_workbook(
+    report: MonthReport,
+    recurring_rows: tuple[str, ...] = (),
+    debt_rows: tuple[str, ...] = (),
+) -> bytes:
     book = _Book()
     _write_month_overview(book, report)
     _write_month_categories(book, report)
     _write_reserves(book, report.goals, report.envelopes, report.unit, 'месяц')
     _write_journal(book, report.transactions, report.ledger, report.unit, with_month=False)
+    _write_side_sheet(book, 'Повторы', '#7C3AED', recurring_rows, 'Повторов нет.')
+    _write_side_sheet(book, 'Долги', '#B45309', debt_rows, 'Открытых долгов нет.')
     return book.save()
 
 
-def render_year_workbook(report: YearReport) -> bytes:
+def render_year_workbook(
+    report: YearReport,
+    recurring_rows: tuple[str, ...] = (),
+    debt_rows: tuple[str, ...] = (),
+) -> bytes:
     book = _Book()
     _write_year_overview(book, report)
     _write_year_categories(book, report)
     _write_reserves(book, report.goals, report.envelopes, report.unit, 'год')
     _write_journal(book, report.transactions, report.ledger, report.unit, with_month=True)
+    _write_side_sheet(book, 'Повторы', '#7C3AED', recurring_rows, 'Повторов нет.')
+    _write_side_sheet(book, 'Долги', '#B45309', debt_rows, 'Открытых долгов нет.')
     return book.save()
+
+
+def _write_side_sheet(book: _Book, name: str, color: str, rows: tuple[str, ...], empty: str) -> None:
+    """Отдельный лист. Соседний модуль сюда не пишет."""
+    sheet = book.add(name, color)
+    sheet.set_column(0, 0, 72)
+    sheet.write(0, 0, name, book.title)
+    if not rows:
+        sheet.write(2, 0, empty, book.subtitle)
+        return
+    for index, line in enumerate(rows):
+        sheet.write(index + 2, 0, line, book.text)
 
 
 class _Book:

@@ -87,6 +87,8 @@ class WeeklyDigest:
     month_name: str = ''
     month_income: Decimal = Decimal('0')
     month_expenses: Decimal = Decimal('0')
+    recurring_lines: tuple[str, ...] = ()
+    debt_lines: tuple[str, ...] = ()
 
     @property
     def balance(self) -> Decimal:
@@ -198,6 +200,9 @@ def build_weekly_digest(
         month_income, month_expenses = income, expenses
         shown_month = month_name(start)
     currency = base_for_user(user)
+    from debts.ledger import obligation_lines
+    from recurring.rhythm import expectation_lines
+
     return WeeklyDigest(
         start=start,
         end=end,
@@ -216,6 +221,8 @@ def build_weekly_digest(
         month_name=shown_month,
         month_income=month_income,
         month_expenses=month_expenses,
+        recurring_lines=tuple(expectation_lines(user, today)),
+        debt_lines=tuple(obligation_lines(user)),
     )
 
 
@@ -401,6 +408,8 @@ def render_rich_html(digest: WeeklyDigest) -> str:
     else:
         parts.append('<p>Активных целей и конвертов нет.</p>')
 
+    parts.extend(_side_blocks_html(digest))
+
     if digest.scope == 'month':
         footer = 'Соседний месяц и Excel — кнопками под сообщением.'
     elif digest.in_progress:
@@ -490,7 +499,37 @@ def render_legacy_html(digest: WeeklyDigest) -> str:
             )
     else:
         lines.append('Активных целей и конвертов нет.')
+    lines.extend(_side_blocks_legacy(digest))
     return '\n'.join(lines)
+
+
+def _side_blocks_html(digest: WeeklyDigest) -> list[str]:
+    """Два отдельных блока. Строки уже готовые, модули друг друга не знают."""
+    parts = ['<h2>Повторяющиеся</h2>']
+    if digest.recurring_lines:
+        parts.append('<p>' + '<br>'.join(escape(line) for line in digest.recurring_lines) + '</p>')
+    else:
+        parts.append('<p>Повторов нет.</p>')
+    parts.append('<h2>Долги</h2>')
+    if digest.debt_lines:
+        parts.append('<p>' + '<br>'.join(escape(line) for line in digest.debt_lines) + '</p>')
+    else:
+        parts.append('<p>Открытых долгов нет.</p>')
+    return parts
+
+
+def _side_blocks_legacy(digest: WeeklyDigest) -> list[str]:
+    lines = ['', '<b>Повторяющиеся</b>']
+    lines.extend(
+        f'• {escape(line)}' for line in digest.recurring_lines
+    ) if digest.recurring_lines else lines.append('Повторов нет.')
+    lines.append('')
+    lines.append('<b>Долги</b>')
+    if digest.debt_lines:
+        lines.extend(f'• {escape(line)}' for line in digest.debt_lines)
+    else:
+        lines.append('Открытых долгов нет.')
+    return lines
 
 
 async def send_rich_article(

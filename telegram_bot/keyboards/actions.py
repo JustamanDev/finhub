@@ -176,6 +176,16 @@ class ActionKeyboard:
                     callback_data="settings",
                 ),
             ],
+            [
+                InlineKeyboardButton(
+                    text="🔁 Повторы",
+                    callback_data="recur_menu",
+                ),
+                InlineKeyboardButton(
+                    text="🤝 Долги",
+                    callback_data="debts_menu",
+                ),
+            ],
         ]
         
         return InlineKeyboardMarkup(buttons) 

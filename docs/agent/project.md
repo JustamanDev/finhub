@@ -25,10 +25,12 @@
 | `transactions` | `Transaction` (итог в базовой валюте + валюта ввода), `ExchangeRate` (курс к рублю, ЦБ) |
 | `budgets` | `Budget` (plan/fact, лимиты по категории/месяцу) |
 | `goals` | `Goal` (`kind`: цель `savings` или конверт `envelope`; `status` включая `archived`), `GoalLedgerEntry` (deposit / withdraw / spend) |
+| `recurring` | `RecurringTemplate` — ритм и ожидание, якорь `next_due` |
+| `debts` | `Debt`, `DebtPayment` — кому и сколько, без транзакции |
 | `telegram_bot` | `TelegramUser` (`base_currency`, `input_currencies`), `UserState`, `BotText`, handlers, services |
 | `api` | URL routing v1 |
 
-**Не реализовано:** приложения `accounts`, `debts`, `trading`, `analytics` и фронтенд. Следующие по очереди, когда вернёмся к коду: повторяющиеся операции и долги. Список: [ideas.md](ideas.md).
+**Не реализовано:** приложения `accounts`, `trading`, `analytics` и фронтенд. Повторы и долги есть. Список оставшихся идей: [ideas.md](ideas.md).
 
 ## Entry points
 

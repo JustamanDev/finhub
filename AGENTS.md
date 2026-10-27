@@ -29,7 +29,7 @@
 
 **Фаза:** бот в проде. Учёт, отчёты, цели и конверты, голос, консультант. Новая работа не начата.
 
-Когда вернёмся к разработке, первыми идут повторяющиеся операции и долги. Остальные идеи (подписка, общий конверт, старый план): [docs/agent/ideas.md](docs/agent/ideas.md). План голоса, уже сданного: [docs/agent/voice-input.md](docs/agent/voice-input.md).
+Повторы и долги уже в боте, отдельными модулями. План: [docs/agent/recurring-and-debts.md](docs/agent/recurring-and-debts.md). Дальше без очереди: [docs/agent/ideas.md](docs/agent/ideas.md). План голоса, уже сданного: [docs/agent/voice-input.md](docs/agent/voice-input.md).
 
 ## Правила для агентов
 
