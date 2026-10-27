@@ -9,7 +9,8 @@
 | [agent/architecture.md](agent/architecture.md) | Telegram bot flow, сервисы, диаграммы |
 | [agent/conventions.md](agent/conventions.md) | Паттерны кода, naming, где что лежит |
 | [agent/roadmap.md](agent/roadmap.md) | Roadmap по фазам |
-| [agent/ideas.md](agent/ideas.md) | Не сделано. Сначала: повтор операций и долги |
+| [agent/ideas.md](agent/ideas.md) | Идеи без утверждённой очереди |
+| [agent/product-strategy.md](agent/product-strategy.md) | Исследование рынка, предложение тарифов и рефералки, экономика запуска |
 | [agent/voice-input.md](agent/voice-input.md) | План голосового ввода (MVP сдан) |
 | [agent/git-workflow.md](agent/git-workflow.md) | Ветки, коммиты, PR (по необходимости) |
 
