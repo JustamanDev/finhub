@@ -38,7 +38,7 @@ class AdvisorModelSplitTests(TestCase):
         with (
             patch(
                 'telegram_bot.services.voice_advisor_executor.advisor_llm_model',
-                return_value='gpt-5.2',
+                return_value='gpt-6-luna',
             ),
             patch(
                 'telegram_bot.services.voice_advisor_executor.advisor_reasoning_effort',
@@ -51,7 +51,7 @@ class AdvisorModelSplitTests(TestCase):
         ):
             model, effort = resolve_advisor_call('advice')
             advice = completion_kwargs(model=model, effort=effort, use_json=True)
-            self.assertEqual(model, 'gpt-5.2')
+            self.assertEqual(model, 'gpt-6-luna')
             self.assertEqual(advice['reasoning_effort'], 'low')
             self.assertNotIn('temperature', advice)
 
@@ -64,6 +64,9 @@ class AdvisorModelSplitTests(TestCase):
             self.assertEqual(fact_model, 'gpt-4o-mini')
             self.assertNotIn('reasoning_effort', fact)
             self.assertEqual(fact['temperature'], 0.2)
+
+
+class AdvisorModeTests(TestCase):
     def test_menu_has_financier_button(self):
         markup = ActionKeyboard.get_main_menu_keyboard()
         buttons = [
