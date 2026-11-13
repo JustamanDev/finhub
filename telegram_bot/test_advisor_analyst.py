@@ -133,6 +133,26 @@ class AdvisorModeTests(TestCase):
         arm_advisor_mode(context, now=1_000)
         self.assertNotIn(ADVISOR_PENDING_KEY, context.user_data)
 
+    def test_choice_button_uses_the_stored_label(self):
+        from telegram_bot.services.advisor_mode import (
+            advisor_option_label,
+            callback_keeps_advisor,
+            hold_advisor_clarification,
+        )
+
+        context = type('Ctx', (), {'user_data': {}})()
+        hold_advisor_clarification(
+            context,
+            'Как накопить на визаран?',
+            now=1_000,
+            options=['Визаран на Бали', 'Подушка'],
+        )
+        self.assertEqual(advisor_option_label(context, 0), 'Визаран на Бали')
+        self.assertIsNone(advisor_option_label(context, 3))
+        self.assertTrue(callback_keeps_advisor('advisor_choice:0'))
+        self.assertTrue(callback_keeps_advisor('advisor_choice_other'))
+        self.assertFalse(callback_keeps_advisor('main_menu'))
+
 
 class AdvisorPayloadTests(TestCase):
     def test_fact_drops_actions_and_extra_tables(self):
@@ -151,6 +171,18 @@ class AdvisorPayloadTests(TestCase):
         )
         self.assertEqual(answer.lead, 'Какая цель: отпуск или ремонт?')
         self.assertEqual(answer.tables, [])
+        self.assertEqual(answer.options, [])
+
+    def test_clarify_keeps_button_labels(self):
+        answer = parse_advisor_payload(
+            '{"answer_kind":"clarify","title":"Уточнение","lead":"Какая цель?",'
+            '"clarify":"Какая цель?","options":["Визаран на Бали","Подушка",'
+            '"Другое","Подушка","Мотоцикл","Отпуск","Лишнее"]}'
+        )
+        self.assertEqual(
+            answer.options,
+            ['Визаран на Бали', 'Подушка', 'Мотоцикл', 'Отпуск', 'Лишнее'],
+        )
         self.assertEqual(answer.actions, [])
 
     def test_advice_keeps_two_steps(self):

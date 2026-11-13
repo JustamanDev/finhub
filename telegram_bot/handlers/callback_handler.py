@@ -51,11 +51,11 @@ class CallbackHandler(BaseHandler):
             )
 
             from telegram_bot.services.advisor_mode import (
-                ADVISOR_ARM_CALLBACKS,
+                callback_keeps_advisor,
                 clear_advisor_mode,
             )
 
-            if query.data not in ADVISOR_ARM_CALLBACKS:
+            if not callback_keeps_advisor(query.data or ''):
                 clear_advisor_mode(context)
             
             # Обрабатываем callback по типу
@@ -524,6 +524,11 @@ class CallbackHandler(BaseHandler):
                     await query.answer("Транзакция не найдена")
             elif query.data in ('ask_advisor', 'advisor_again'):
                 await self._handle_ask_advisor(query, context, telegram_user)
+            elif (
+                query.data == 'advisor_choice_other'
+                or (query.data or '').startswith('advisor_choice:')
+            ):
+                await self._handle_advisor_choice(update, context, telegram_user)
             elif query.data == "main_menu":
                 logger.info("Вызываем _handle_main_menu")
                 await self._handle_main_menu(query, context, telegram_user)
@@ -1765,6 +1770,75 @@ class CallbackHandler(BaseHandler):
                     callback_data='main_menu',
                 )],
             ]),
+        )
+
+    async def _handle_advisor_choice(
+        self,
+        update: Update,
+        context: ContextTypes.DEFAULT_TYPE,
+        telegram_user,
+    ) -> None:
+        """Кнопка уточнения: вариант сразу, «Другое» ждёт текст или голос."""
+        from telegram_bot.services.advisor_mode import (
+            ADVISOR_OPTIONS_KEY,
+            ADVISOR_PENDING_KEY,
+            advisor_option_label,
+            followup_question,
+            hold_advisor_clarification,
+        )
+        from telegram_bot.voice.intents import ParsedVoiceCommand, VoiceIntentType
+
+        query = update.callback_query
+        if query.data == 'advisor_choice_other':
+            pending = ''
+            options: list[str] = []
+            data = getattr(context, 'user_data', None)
+            if isinstance(data, dict):
+                pending = str(data.get(ADVISOR_PENDING_KEY) or '')
+                stored = data.get(ADVISOR_OPTIONS_KEY) or []
+                if isinstance(stored, list):
+                    options = [str(item) for item in stored]
+            if not pending:
+                await query.answer(
+                    'Это уточнение уже закрыто. Нажмите «Финансист» ещё раз.',
+                    show_alert=True,
+                )
+                return
+            hold_advisor_clarification(context, pending, options=options)
+            await query.answer()
+            await query.message.reply_text(
+                'Напишите или надиктуйте, что имелось в виду.',
+            )
+            return
+
+        try:
+            index = int((query.data or '').split(':', 1)[1])
+        except (IndexError, ValueError):
+            index = -1
+        label = advisor_option_label(context, index)
+        if not label:
+            await query.answer(
+                'Это уточнение уже закрыто. Нажмите «Финансист» ещё раз.',
+                show_alert=True,
+            )
+            return
+        question = followup_question(context, label)
+        data = getattr(context, 'user_data', None)
+        if isinstance(data, dict):
+            data.pop('advisor_armed_until', None)
+            data.pop(ADVISOR_OPTIONS_KEY, None)
+        await query.answer()
+        await self._command_executor.execute_ask_advisor(
+            update,
+            context,
+            telegram_user,
+            ParsedVoiceCommand(
+                intent=VoiceIntentType.ASK_ADVISOR,
+                success=True,
+                confidence=1.0,
+                raw_transcript=question,
+            ),
+            profile='advice',
         )
 
     async def _handle_goals_menu(

@@ -753,20 +753,30 @@ class CommandExecutor:
             return
 
         html, legacy = render_advisor_article(result.answer, result.snapshot)
-        keyboard = InlineKeyboardMarkup([
-            [
-                InlineKeyboardButton(
-                    text='Ещё вопрос',
-                    callback_data='advisor_again',
-                ),
-            ],
-            [
-                InlineKeyboardButton(
-                    text='🏠 Главное меню',
-                    callback_data='main_menu',
-                ),
-            ],
+        rows: list[list[InlineKeyboardButton]] = []
+        if result.answer.answer_kind == 'clarify' and result.answer.options:
+            rows.extend(
+                [InlineKeyboardButton(
+                    text=label,
+                    callback_data=f'advisor_choice:{index}',
+                )]
+                for index, label in enumerate(result.answer.options)
+            )
+            rows.append([InlineKeyboardButton(
+                text='Другое',
+                callback_data='advisor_choice_other',
+            )])
+        rows.extend([
+            [InlineKeyboardButton(
+                text='Ещё вопрос',
+                callback_data='advisor_again',
+            )],
+            [InlineKeyboardButton(
+                text='🏠 Главное меню',
+                callback_data='main_menu',
+            )],
         ])
+        keyboard = InlineKeyboardMarkup(rows)
         await send_rich_article(
             context.bot,
             update.effective_chat.id,
@@ -780,7 +790,11 @@ class CommandExecutor:
                 hold_advisor_clarification,
             )
 
-            hold_advisor_clarification(context, question)
+            hold_advisor_clarification(
+                context,
+                question,
+                options=result.answer.options,
+            )
         try:
             await status.delete()
         except Exception:
