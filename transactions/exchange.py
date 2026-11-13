@@ -352,12 +352,13 @@ def rescale_user_books(user, old_base: str, new_base: str) -> Decimal:
     """
     Пересчитывает уже записанные суммы в новую базовую валюту по сегодняшнему курсу.
 
-    Исходная сумма операции не меняется. Меняются итог, курс к базе, лимиты и цели.
+    Исходная сумма операции не меняется. Меняются итог, курс к базе и лимиты.
+    Цели, конверты и долги остаются в своей валюте: у цели пересчитывается
+    только уже записанный эквивалент в валюте отчёта.
     """
     from django.db import transaction as db_transaction
 
     from budgets.models import Budget
-    from goals.models import Goal
 
     factor = convert_factor(old_base, new_base)
     if old_base == new_base:
@@ -377,13 +378,13 @@ def rescale_user_books(user, old_base: str, new_base: str) -> Decimal:
         for budget in Budget.objects.filter(user=user):
             budget.amount = scale(budget.amount)
             budget.save(update_fields=['amount', 'updated_at'])
-        for goal in Goal.objects.filter(user=user):
-            if goal.target_amount is not None:
-                goal.target_amount = scale(goal.target_amount)
-                goal.save(update_fields=['target_amount', 'updated_at'])
-            for entry in goal.entries.all():
-                entry.amount = scale(entry.amount)
-                entry.save(update_fields=['amount', 'updated_at'])
+        from goals.models import GoalLedgerEntry
+
+        for entry in GoalLedgerEntry.objects.filter(goal__user=user):
+            current = entry.report_amount if entry.report_amount is not None else entry.amount
+            entry.report_amount = scale(current)
+            entry.report_currency = new_base
+            entry.save(update_fields=['report_amount', 'report_currency', 'updated_at'])
     return factor
 
 

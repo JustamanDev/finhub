@@ -67,6 +67,7 @@ class ReportExportService:
             ledger=source.ledger,
             goals=source.goals,
             budgets=source.budgets,
+            currency_code=source.currency_code,
         )
         recurring_rows, debt_rows = await sync_to_async(self._side_rows)(today)
         return ExcelExportResult(
@@ -94,6 +95,7 @@ class ReportExportService:
             ledger=source.ledger,
             goals=source.goals,
             budgets=source.budgets,
+            currency_code=source.currency_code,
         )
         recurring_rows, debt_rows = await sync_to_async(self._side_rows)(today)
         return ExcelExportResult(
@@ -138,6 +140,7 @@ class ReportExportService:
             currency = base_for_user(user)
             return _Source(
                 unit=symbol_of(currency),
+                currency_code=currency,
                 currency_phrase=reports_phrase(currency),
                 generated_label=timezone.localtime().strftime('%d.%m.%Y %H:%M'),
                 transactions=[_tx(item) for item in transactions],
@@ -154,6 +157,7 @@ class _Source:
         self,
         *,
         unit: str,
+        currency_code: str,
         currency_phrase: str,
         generated_label: str,
         transactions: list[Tx],
@@ -162,6 +166,7 @@ class _Source:
         budgets: list[BudgetSnap],
     ):
         self.unit = unit
+        self.currency_code = currency_code
         self.currency_phrase = currency_phrase
         self.generated_label = generated_label
         self.transactions = transactions
@@ -197,6 +202,8 @@ def _entry(item: GoalLedgerEntry) -> LedgerTx:
         entry_type=item.entry_type,
         amount=Decimal(item.amount),
         comment=item.comment or '',
+        report_amount=Decimal(item.report_amount if item.report_amount is not None else item.amount),
+        currency=item.goal.currency or RUB,
     )
 
 
@@ -208,6 +215,7 @@ def _goal(item: Goal) -> GoalSnap:
         status=item.status,
         target_amount=Decimal(item.target_amount) if item.target_amount is not None else None,
         deadline=item.deadline,
+        currency=item.currency or RUB,
     )
 
 

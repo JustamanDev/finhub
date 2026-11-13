@@ -76,6 +76,7 @@ class GoalsKeyboard:
     def get_goal_card_keyboard(
         goal_id: int,
         quick_amount: Decimal | None = None,
+        quick_symbol: str = '₽',
     ) -> InlineKeyboardMarkup:
         rows = []
         if quick_amount is not None and quick_amount > 0:
@@ -83,7 +84,7 @@ class GoalsKeyboard:
             rows.append(
                 [
                     InlineKeyboardButton(
-                        text=f"⚡ Перевести {rub:,.0f} ₽",
+                        text=f"⚡ Перевести {rub:,.0f} {quick_symbol}",
                         callback_data=f"goal_quick_deposit_{goal_id}_{rub}",
                     ),
                 ]

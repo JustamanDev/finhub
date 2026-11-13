@@ -77,6 +77,8 @@ class LedgerTx:
     entry_type: str
     amount: Decimal
     comment: str
+    report_amount: Decimal | None = None
+    currency: str = 'RUB'
 
 
 @dataclass(frozen=True)
@@ -87,6 +89,7 @@ class GoalSnap:
     status: str
     target_amount: Decimal | None
     deadline: date | None
+    currency: str = 'RUB'
 
 
 @dataclass(frozen=True)
@@ -143,6 +146,7 @@ class GoalRow:
     period_deposited: Decimal
     period_withdrawn: Decimal
     period_spent: Decimal
+    currency: str = 'RUB'
 
 
 @dataclass(frozen=True)
@@ -156,6 +160,7 @@ class EnvelopeRow:
     period_deposited: Decimal
     period_spent: Decimal
     period_withdrawn: Decimal
+    currency: str = 'RUB'
 
 
 @dataclass(frozen=True)
@@ -202,6 +207,7 @@ class MonthReport:
     envelopes: tuple[EnvelopeRow, ...]
     transactions: tuple[Tx, ...]
     ledger: tuple[LedgerTx, ...]
+    currency_code: str = 'RUB'
 
 
 @dataclass(frozen=True)
@@ -219,6 +225,7 @@ class YearReport:
     envelopes: tuple[EnvelopeRow, ...]
     transactions: tuple[Tx, ...]
     ledger: tuple[LedgerTx, ...]
+    currency_code: str = 'RUB'
 
 
 def period_title(year: int, month: int) -> str:
@@ -264,6 +271,7 @@ def build_month_report(
     ledger: list[LedgerTx],
     goals: list[GoalSnap],
     budgets: list[BudgetSnap],
+    currency_code: str = 'RUB',
 ) -> MonthReport:
     start, end = month_bounds(year, month)
     last = end - timedelta(days=1)
@@ -311,6 +319,7 @@ def build_month_report(
         envelopes=_envelope_rows(goals, ledger, start, as_of),
         transactions=tuple(sorted(period_tx, key=lambda item: (item.day, item.id))),
         ledger=tuple(sorted(period_ledger, key=lambda item: (item.day, item.title))),
+        currency_code=currency_code,
     )
 
 
@@ -325,6 +334,7 @@ def build_year_report(
     ledger: list[LedgerTx],
     goals: list[GoalSnap],
     budgets: list[BudgetSnap],
+    currency_code: str = 'RUB',
 ) -> YearReport:
     del budgets  # лимиты живут в файле месяца, годовая матрица — про факт
     year_start = date(year, 1, 1)
@@ -385,6 +395,7 @@ def build_year_report(
             _between_ledger(ledger, year_start, as_of),
             key=lambda item: (item.day, item.title),
         )),
+        currency_code=currency_code,
     )
 
 
@@ -651,6 +662,7 @@ def _goal_rows(
             period_deposited=period[0],
             period_withdrawn=period[1],
             period_spent=period[2],
+            currency=goal.currency,
         ))
     rows.sort(key=lambda row: row.title)
     return tuple(rows)
@@ -685,6 +697,7 @@ def _envelope_rows(
             period_deposited=period[0],
             period_spent=period[2],
             period_withdrawn=period[1],
+            currency=goal.currency,
         ))
     rows.sort(key=lambda row: row.title)
     return tuple(rows)
@@ -716,10 +729,16 @@ def _signed_totals(transactions: list[Tx], *, negative: bool) -> dict[int, Decim
     return totals
 
 
+def _booked(entry: LedgerTx) -> Decimal:
+    if entry.report_amount is not None:
+        return entry.report_amount
+    return entry.amount
+
+
 def _flow(transactions: list[Tx], ledger: list[LedgerTx]) -> Flow:
     income = sum((item.amount for item in transactions if item.amount > 0), ZERO)
     expenses = sum((-item.amount for item in transactions if item.amount < 0), ZERO)
-    allocated = sum((entry.amount for entry in ledger), ZERO)
+    allocated = sum((_booked(entry) for entry in ledger), ZERO)
     return Flow(income, expenses, allocated)
 
 

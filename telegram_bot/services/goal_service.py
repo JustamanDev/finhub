@@ -52,6 +52,7 @@ class GoalService:
         target_amount: Optional[Decimal] = None,
         deadline: Optional[date] = None,
         kind: str = Goal.SAVINGS,
+        currency: Optional[str] = None,
     ) -> Goal:
         title = (title or '').strip()
         if kind == Goal.ENVELOPE:
@@ -59,6 +60,8 @@ class GoalService:
             deadline = None
         elif target_amount is None or Decimal(target_amount) <= 0:
             raise ValueError('Целевая сумма должна быть больше нуля.')
+
+        code = await sync_to_async(self._native_currency, thread_sensitive=True)(currency)
 
         existing = await sync_to_async(
             lambda: list(Goal.objects.filter(user=self.user, title=title)),
@@ -71,7 +74,11 @@ class GoalService:
                 if kind == Goal.SAVINGS:
                     goal.target_amount = target_amount
                     goal.deadline = deadline
-                    update_fields.extend(['target_amount', 'deadline'])
+                    goal.currency = code
+                    update_fields.extend(['target_amount', 'deadline', 'currency'])
+                else:
+                    goal.currency = code
+                    update_fields.append('currency')
                 await sync_to_async(goal.save)(update_fields=update_fields)
                 return goal
             if goal.status == Goal.ARCHIVED:
@@ -88,18 +95,41 @@ class GoalService:
             user=self.user,
             title=title,
             kind=kind,
+            currency=code,
             target_amount=target_amount,
             deadline=deadline,
         )
+
+    def _free_in_goal_currency(self, free_funds: Decimal, goal: Goal) -> Decimal:
+        """Свободные деньги месяца в валюте цели, чтобы срок не сравнивал рубли с долларами."""
+        from transactions.booking import convert_signed
+        from transactions.currencies import base_for_user
+        from transactions.exchange import ExchangeRateUnavailable
+
+        base = base_for_user(self.user)
+        code = goal.currency or base
+        if code == base:
+            return Decimal(free_funds)
+        try:
+            return convert_signed(free_funds, base, code)
+        except ExchangeRateUnavailable:
+            return Decimal('0')
+
+    def _native_currency(self, currency: Optional[str]) -> str:
+        from transactions.currencies import RUB, base_for_user, is_known
+
+        code = currency or base_for_user(self.user)
+        return code if is_known(code) else RUB
 
     async def create_envelope(
         self,
         title: str,
         initial: Decimal = Decimal('0'),
+        currency: Optional[str] = None,
     ) -> Goal:
-        goal = await self.create_goal(title, kind=Goal.ENVELOPE)
+        goal = await self.create_goal(title, kind=Goal.ENVELOPE, currency=currency)
         if initial and Decimal(initial) > 0:
-            await self.add_deposit(goal.id, Decimal(initial))
+            await self.add_deposit(goal.id, Decimal(initial), source_currency=goal.currency)
         return goal
 
     async def list_goals(self) -> list[Goal]:
@@ -140,15 +170,14 @@ class GoalService:
         goal_id: int,
         amount: Decimal,
         comment: str = "",
+        source_currency: Optional[str] = None,
     ) -> Optional[GoalLedgerEntry]:
-        goal = await self.get_goal(goal_id)
-        if not goal:
-            return None
-        return await GoalLedgerEntry.objects.acreate(
-            goal=goal,
-            amount=abs(amount),
-            entry_type=GoalLedgerEntry.DEPOSIT,
-            comment=comment,
+        return await self._add_signed(
+            goal_id,
+            abs(amount),
+            GoalLedgerEntry.DEPOSIT,
+            comment,
+            source_currency,
         )
 
     async def add_withdraw(
@@ -156,15 +185,59 @@ class GoalService:
         goal_id: int,
         amount: Decimal,
         comment: str = "",
+        source_currency: Optional[str] = None,
+    ) -> Optional[GoalLedgerEntry]:
+        return await self._add_signed(
+            goal_id,
+            -abs(amount),
+            GoalLedgerEntry.WITHDRAW,
+            comment,
+            source_currency,
+        )
+
+    async def _add_signed(
+        self,
+        goal_id: int,
+        signed_input: Decimal,
+        entry_type: str,
+        comment: str,
+        source_currency: Optional[str],
     ) -> Optional[GoalLedgerEntry]:
         goal = await self.get_goal(goal_id)
         if not goal:
             return None
+
+        def _values():
+            from transactions.booking import book_positive
+            from transactions.currencies import base_for_user, format_money, is_known
+
+            base = base_for_user(self.user)
+            native_code = goal.currency or base
+            source = source_currency if is_known(source_currency) else native_code
+            booked = book_positive(signed_input, source, native_code, base)
+            sign = Decimal('1') if signed_input >= 0 else Decimal('-1')
+            if sign < 0:
+                from telegram_bot.services.goal_spend import goal_balance
+
+                available = goal_balance(goal.id)
+                if booked.native > available:
+                    raise ValueError(
+                        f'Там лежит {format_money(available, native_code)}. '
+                        'Снять можно не больше.',
+                    )
+            note = comment
+            if source != native_code and not note:
+                note = format_money(abs(signed_input), source)
+            return sign * booked.native, sign * booked.report, base, note
+
+        native, report, base, note = await sync_to_async(_values, thread_sensitive=True)()
         return await GoalLedgerEntry.objects.acreate(
             goal=goal,
-            amount=-abs(amount),
-            entry_type=GoalLedgerEntry.WITHDRAW,
-            comment=comment,
+            amount=native,
+            report_amount=report,
+            report_currency=base,
+            entry_type=entry_type,
+            comment=note,
         )
 
     async def get_goal_balance(self, goal_id: int) -> Decimal:
@@ -241,7 +314,9 @@ class GoalService:
             occurred_at__lt=end_dt,
         )
         allocations_net = await sync_to_async(
-            lambda: entries_qs.aggregate(total=Coalesce(models.Sum('amount'), Decimal('0')))['total'],
+            lambda: entries_qs.aggregate(
+                total=Coalesce(models.Sum('report_amount'), Decimal('0')),
+            )['total'],
             thread_sensitive=True,
         )()
 
@@ -347,6 +422,10 @@ class GoalService:
             remaining_this_month = max(planned_this_month - deposited_this_month, Decimal('0'))
 
         free_funds = await self.get_free_funds_for_month(today)
+        free_for_goal = await sync_to_async(
+            self._free_in_goal_currency,
+            thread_sensitive=True,
+        )(free_funds, goal)
         from telegram_bot.services.goal_eta import build_goal_eta
 
         eta = None
@@ -360,7 +439,7 @@ class GoalService:
                 deadline=goal.deadline,
                 monthly_nets=monthly_nets,
                 deposited_this_month=deposited_this_month,
-                free_funds=free_funds,
+                free_funds=free_for_goal,
             )
             recommendations = await self.get_budget_underuse_recommendations(today)
 

@@ -39,10 +39,22 @@ def list_goals_for_spend(user: User) -> list[tuple[Goal, Decimal]]:
     return [(goal, goal_balance(goal.id)) for goal in goals]
 
 
-def _money_symbol(user) -> str:
-    from transactions.currencies import base_for_user, symbol_of
+def _money_symbol(goal: Goal) -> str:
+    from transactions.currencies import RUB, symbol_of
 
-    return symbol_of(base_for_user(user))
+    return symbol_of(goal.currency or RUB)
+
+
+def _spend_parts(transaction: Transaction, goal: Goal) -> tuple[Decimal, Decimal, str]:
+    """Сколько списать в валюте цели и сколько это в валюте отчёта."""
+    from transactions.booking import book_positive
+    from transactions.currencies import RUB, base_for_user, is_known
+
+    base = base_for_user(transaction.user)
+    source = transaction.report_currency if is_known(transaction.report_currency) else base
+    native_code = goal.currency if is_known(goal.currency) else RUB
+    booked = book_positive(abs(transaction.amount), source, native_code, base)
+    return booked.native, booked.report, base
 
 
 def goal_spend_note(transaction_id: int) -> str:
@@ -59,7 +71,7 @@ def goal_spend_note(transaction_id: int) -> str:
     if entry is None:
         return ''
     remaining = goal_balance(entry.goal_id)
-    sym = _money_symbol(entry.goal.user)
+    sym = _money_symbol(entry.goal)
     if entry.goal.is_envelope:
         return (
             f'\nИз конверта «{entry.goal.title}». '
@@ -91,7 +103,7 @@ def spend_expense_from_goal(
     except Goal.DoesNotExist:
         return GoalSpendResult(False, 'Цель не найдена.')
 
-    need = abs(transaction.amount)
+    need, report, base = _spend_parts(transaction, goal)
     existing = list(
         GoalLedgerEntry.objects.filter(
             linked_transaction=transaction,
@@ -105,7 +117,7 @@ def spend_expense_from_goal(
     available = goal_balance(goal.id) + already_here
     if need > available:
         place = 'конверте' if goal.is_envelope else 'цели'
-        sym = _money_symbol(user)
+        sym = _money_symbol(goal)
         return GoalSpendResult(
             False,
             (
@@ -119,6 +131,8 @@ def spend_expense_from_goal(
     GoalLedgerEntry.objects.create(
         goal=goal,
         amount=-need,
+        report_amount=-report,
+        report_currency=base,
         entry_type=GoalLedgerEntry.SPEND,
         occurred_at=noon_on(transaction.date),
         linked_transaction=transaction,
@@ -137,13 +151,19 @@ def ensure_spend_fits(transaction: Transaction, new_abs_amount: Decimal) -> None
     entry = _linked_spend(transaction.id)
     if entry is None:
         return
+    held = transaction.amount
+    transaction.amount = -abs(new_abs_amount)
+    try:
+        need, _, _ = _spend_parts(transaction, entry.goal)
+    finally:
+        transaction.amount = held
     available = goal_balance(entry.goal_id) + abs(entry.amount)
-    if new_abs_amount > available:
+    if need > available:
         place = 'конверте' if entry.goal.is_envelope else 'цели'
-        sym = _money_symbol(transaction.user)
+        sym = _money_symbol(entry.goal)
         raise GoalSpendShortfall(
             f'На {place} «{entry.goal.title}» {available:,.0f} {sym}, '
-            f'нужно {new_abs_amount:,.0f} {sym}.',
+            f'нужно {need:,.0f} {sym}.',
         )
 
 
@@ -151,8 +171,11 @@ def resize_linked_spend(transaction: Transaction) -> None:
     entry = _linked_spend(transaction.id)
     if entry is None:
         return
-    entry.amount = -abs(transaction.amount)
-    entry.save(update_fields=['amount', 'updated_at'])
+    native, report, base = _spend_parts(transaction, entry.goal)
+    entry.amount = -native
+    entry.report_amount = -report
+    entry.report_currency = base
+    entry.save(update_fields=['amount', 'report_amount', 'report_currency', 'updated_at'])
 
 
 def move_linked_spend(transaction: Transaction) -> None:

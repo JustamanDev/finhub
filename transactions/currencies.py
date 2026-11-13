@@ -1,6 +1,7 @@
 """Каталог валют. Курсы к рублю публикует ЦБ, отчёты считаются в базовой валюте."""
 
 from dataclasses import dataclass
+from decimal import Decimal, ROUND_HALF_UP
 
 from django.core.exceptions import ObjectDoesNotExist
 
@@ -71,6 +72,14 @@ def default_input_currencies() -> list[str]:
 
 def is_known(code: str | None) -> bool:
     return bool(code) and code in BY_CODE
+
+
+def format_money(amount, currency: str | None) -> str:
+    """Целое число с пробелами и символом валюты."""
+    whole = int(Decimal(amount).quantize(Decimal('1'), rounding=ROUND_HALF_UP))
+    sign = '−' if whole < 0 else ''
+    grouped = f'{abs(whole):,}'.replace(',', ' ')
+    return f'{sign}{grouped} {symbol_of(currency)}'
 
 
 def symbol_of(code: str | None) -> str:

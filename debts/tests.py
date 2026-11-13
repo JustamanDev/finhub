@@ -57,3 +57,36 @@ class DebtTests(TestCase):
         self.assertIn('Маша', text)
         self.assertIn('мне должны', text)
         self.assertNotIn('Аренда', text)
+
+    def test_debt_keeps_dong_and_report_shows_rubles(self):
+        from transactions.exchange import moscow_today
+        from transactions.models import ExchangeRate
+
+        user = User.objects.create_user(username='vnd-debt', password='x')
+        ExchangeRate.objects.create(
+            rate_date=date(2026, 11, 13),
+            base_currency='VND',
+            quote_currency='RUB',
+            nominal=1,
+            value=Decimal('0.004'),
+            rate=Decimal('0.004'),
+            fetched_on=moscow_today(),
+        )
+        debt = Debt.objects.create(
+            user=user,
+            counterparty='Ань',
+            direction=Debt.OWED,
+            principal=Decimal('170000'),
+            currency='VND',
+        )
+        text = '\n'.join(obligation_lines(user))
+        self.assertIn('170 000 ₫', text)
+        self.assertIn('≈ 680 ₽', text)
+        self.assertNotIn('170 000 ₽', text)
+
+        add_payment(debt, Decimal('680'), date(2026, 11, 13), source_currency='RUB')
+        debt.refresh_from_db()
+        self.assertFalse(debt.is_open)
+        payment = debt.payments.get()
+        self.assertEqual(payment.amount, Decimal('170000.00'))
+        self.assertEqual(payment.input_currency, 'RUB')

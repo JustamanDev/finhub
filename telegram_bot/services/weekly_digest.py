@@ -66,6 +66,7 @@ class GoalRow:
     target: Decimal | None
     note: str
     kind: str = 'savings'
+    currency: str = 'RUB'
 
 
 @dataclass(frozen=True)
@@ -715,7 +716,7 @@ def _goal_allocations(user, start: date, end: date) -> Decimal:
         goal__user=user,
         occurred_at__gte=start_dt,
         occurred_at__lt=end_dt,
-    ).aggregate(total=Coalesce(Sum('amount'), Decimal('0')))['total']
+    ).aggregate(total=Coalesce(Sum('report_amount'), Decimal('0')))['total']
     return Decimal(total or 0)
 
 
@@ -744,11 +745,39 @@ def _budget_rows(user, start: date, end: date) -> tuple[BudgetRow, ...]:
     return tuple(rows)
 
 
-def _goal_collected(row: GoalRow, currency: str = 'RUB') -> str:
+def _goal_collected(row: GoalRow, report_currency: str = 'RUB') -> str:
+    code = row.currency or report_currency
     if row.kind == 'envelope':
-        return f'лежит {format_rub(row.balance, currency)}'
+        native = f'лежит {format_rub(row.balance, code)}'
+        return _with_report(native, row.balance, code, report_currency)
     target = row.target if row.target is not None else Decimal('0')
-    return f'{format_rub(row.balance, currency)} / {format_rub(target, currency)}'
+    native = f'{format_rub(row.balance, code)} / {format_rub(target, code)}'
+    return _with_report(native, row.balance, code, report_currency)
+
+
+def _free_for_goal(free_funds: Decimal, report_currency: str, goal_currency: str) -> Decimal:
+    if goal_currency == report_currency:
+        return free_funds
+    from transactions.booking import convert_signed
+    from transactions.exchange import ExchangeRateUnavailable
+
+    try:
+        return convert_signed(free_funds, report_currency, goal_currency)
+    except ExchangeRateUnavailable:
+        return Decimal('0')
+
+
+def _with_report(text: str, amount: Decimal, native: str, report_currency: str) -> str:
+    if native == report_currency or amount == 0:
+        return text
+    from transactions.booking import convert_signed
+    from transactions.exchange import ExchangeRateUnavailable
+
+    try:
+        converted = convert_signed(amount, native, report_currency)
+    except ExchangeRateUnavailable:
+        return text
+    return f'{text} (≈ {format_rub(converted, report_currency)})'
 
 
 def _goal_rows(user, today: date, currency: str = 'RUB') -> tuple[GoalRow, ...]:
@@ -760,6 +789,7 @@ def _goal_rows(user, today: date, currency: str = 'RUB') -> tuple[GoalRow, ...]:
     for goal in goals[:_MAX_GOAL_ROWS]:
         totals = ledger_totals(goal.id)
         balance = max(totals.balance, Decimal('0'))
+        code = goal.currency or currency
         if goal.is_envelope:
             rows.append(GoalRow(
                 title=goal.title,
@@ -767,6 +797,7 @@ def _goal_rows(user, today: date, currency: str = 'RUB') -> tuple[GoalRow, ...]:
                 target=None,
                 note='конверт',
                 kind='envelope',
+                currency=code,
             ))
             continue
         deposited = _month_deposits(goal, today)
@@ -779,13 +810,14 @@ def _goal_rows(user, today: date, currency: str = 'RUB') -> tuple[GoalRow, ...]:
             deadline=goal.deadline,
             monthly_nets=nets,
             deposited_this_month=deposited,
-            free_funds=month_free,
+            free_funds=_free_for_goal(month_free, currency, code),
         )
         rows.append(GoalRow(
             title=goal.title,
             balance=committed,
             target=Decimal(goal.target_amount or 0),
-            note=_goal_note(eta, currency),
+            note=_goal_note(eta, code),
+            currency=code,
         ))
     return tuple(rows)
 

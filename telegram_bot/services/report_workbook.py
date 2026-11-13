@@ -66,7 +66,7 @@ def render_month_workbook(
     book = _Book()
     _write_month_overview(book, report)
     _write_month_categories(book, report)
-    _write_reserves(book, report.goals, report.envelopes, report.unit, 'месяц')
+    _write_reserves(book, report.goals, report.envelopes, report.unit, 'месяц', report.currency_code)
     _write_journal(book, report.transactions, report.ledger, report.unit, with_month=False)
     _write_side_sheet(book, 'Повторы', '#7C3AED', recurring_rows, 'Повторов нет.')
     _write_side_sheet(book, 'Долги', '#B45309', debt_rows, 'Открытых долгов нет.')
@@ -81,7 +81,7 @@ def render_year_workbook(
     book = _Book()
     _write_year_overview(book, report)
     _write_year_categories(book, report)
-    _write_reserves(book, report.goals, report.envelopes, report.unit, 'год')
+    _write_reserves(book, report.goals, report.envelopes, report.unit, 'год', report.currency_code)
     _write_journal(book, report.transactions, report.ledger, report.unit, with_month=True)
     _write_side_sheet(book, 'Повторы', '#7C3AED', recurring_rows, 'Повторов нет.')
     _write_side_sheet(book, 'Долги', '#B45309', debt_rows, 'Открытых долгов нет.')
@@ -477,9 +477,16 @@ def _write_year_categories(book: _Book, report: YearReport) -> None:
     del income_header_owner
 
 
-def _write_reserves(book: _Book, goals: tuple[GoalRow, ...], envelopes: tuple[EnvelopeRow, ...], unit: str, period: str) -> None:
+def _write_reserves(
+    book: _Book,
+    goals: tuple[GoalRow, ...],
+    envelopes: tuple[EnvelopeRow, ...],
+    unit: str,
+    period: str,
+    currency_code: str = 'RUB',
+) -> None:
     ws = book.add('Резервы', FREE)
-    widths = (28, 14, 14, 16, 16, 16, 16, 16, 14, 16, 18, 16, 18)
+    widths = (28, 14, 14, 16, 16, 16, 16, 16, 14, 16, 18, 16, 18, 24)
     for index, width in enumerate(widths):
         ws.set_column(index, index, width)
     ws.merge_range(0, 0, 0, 8, 'Цели и конверты', book.title)
@@ -497,6 +504,7 @@ def _write_reserves(book: _Book, goals: tuple[GoalRow, ...], envelopes: tuple[En
         f'Потрачено ({unit})', f'Сейчас лежит ({unit})', f'Осталось ({unit})', 'Прогресс',
         f'План в месяц ({unit})', f'Внесено за {period} ({unit})',
         f'Снято за {period} ({unit})', f'Покупки за {period} ({unit})',
+        'Как в цели',
     )
     ws.write_row(4, 0, headers, book.header)
     ws.set_row(4, 36)
@@ -507,7 +515,7 @@ def _write_reserves(book: _Book, goals: tuple[GoalRow, ...], envelopes: tuple[En
     else:
         first = row
         for goal in goals:
-            _write_goal(book, ws, row, goal)
+            _write_goal(book, ws, row, goal, currency_code)
             row += 1
         ws.conditional_format(first, 8, row - 1, 8, {
             'type': 'data_bar',
@@ -527,6 +535,7 @@ def _write_reserves(book: _Book, goals: tuple[GoalRow, ...], envelopes: tuple[En
             f'Снято ({unit})', f'Остаток ({unit})',
             f'Внесено за {period} ({unit})', f'Потрачено за {period} ({unit})',
             f'Снято за {period} ({unit})',
+            'Как в конверте',
         ),
         book.header,
     )
@@ -536,7 +545,7 @@ def _write_reserves(book: _Book, goals: tuple[GoalRow, ...], envelopes: tuple[En
         ws.write(row, 0, 'Активных конвертов нет.', book.muted)
         return
     for envelope in envelopes:
-        _write_envelope(book, ws, row, envelope)
+        _write_envelope(book, ws, row, envelope, currency_code)
         row += 1
     ws.freeze_panes(5, 1)
 
@@ -712,38 +721,57 @@ def _write_year_category(book: _Book, ws, row: int, item: CategoryYearRow, repor
     _ratio_cell(book, ws, row, 14, item.share)
 
 
-def _write_goal(book: _Book, ws, row: int, goal: GoalRow) -> None:
+def _write_goal(book: _Book, ws, row: int, goal: GoalRow, currency_code: str = 'RUB') -> None:
+    from transactions.currencies import format_money
+
+    code = goal.currency or currency_code
     ws.write(row, 0, goal.title, book.text)
     ws.write(row, 1, STATUS.get(goal.status, goal.status), book.text)
     if goal.deadline:
         ws.write_datetime(row, 2, _midnight(goal.deadline), book.date)
     else:
         ws.write_blank(row, 2, None, book.text)
-    _money_cell(book, ws, row, 3, goal.target)
-    _money_cell(book, ws, row, 4, goal.committed)
-    _money_cell(book, ws, row, 5, goal.spent_total)
-    _money_cell(book, ws, row, 6, goal.balance)
-    _money_cell(book, ws, row, 7, goal.remaining)
+    _money_cell(book, ws, row, 3, _as_report(goal.target, code, currency_code))
+    _money_cell(book, ws, row, 4, _as_report(goal.committed, code, currency_code))
+    _money_cell(book, ws, row, 5, _as_report(goal.spent_total, code, currency_code))
+    _money_cell(book, ws, row, 6, _as_report(goal.balance, code, currency_code))
+    _money_cell(book, ws, row, 7, _as_report(goal.remaining, code, currency_code))
     _ratio_cell(book, ws, row, 8, goal.progress)
     if goal.plan_per_month is None:
         ws.write_blank(row, 9, None, book.text)
     else:
-        _money_cell(book, ws, row, 9, goal.plan_per_month)
-    _money_cell(book, ws, row, 10, goal.period_deposited)
-    _money_cell(book, ws, row, 11, goal.period_withdrawn)
-    _money_cell(book, ws, row, 12, goal.period_spent)
+        _money_cell(book, ws, row, 9, _as_report(goal.plan_per_month, code, currency_code))
+    _money_cell(book, ws, row, 10, _as_report(goal.period_deposited, code, currency_code))
+    _money_cell(book, ws, row, 11, _as_report(goal.period_withdrawn, code, currency_code))
+    _money_cell(book, ws, row, 12, _as_report(goal.period_spent, code, currency_code))
+    ws.write(
+        row,
+        13,
+        f'{format_money(goal.committed, code)} / {format_money(goal.target, code)}',
+        book.text,
+    )
 
 
-def _write_envelope(book: _Book, ws, row: int, envelope: EnvelopeRow) -> None:
+def _write_envelope(
+    book: _Book,
+    ws,
+    row: int,
+    envelope: EnvelopeRow,
+    currency_code: str = 'RUB',
+) -> None:
+    from transactions.currencies import format_money
+
+    code = envelope.currency or currency_code
     ws.write(row, 0, envelope.title, book.text)
     ws.write(row, 1, STATUS.get(envelope.status, envelope.status), book.text)
-    _money_cell(book, ws, row, 2, envelope.deposited)
-    _money_cell(book, ws, row, 3, envelope.spent)
-    _money_cell(book, ws, row, 4, envelope.withdrawn)
-    _money_cell(book, ws, row, 5, envelope.balance)
-    _money_cell(book, ws, row, 6, envelope.period_deposited)
-    _money_cell(book, ws, row, 7, envelope.period_spent)
-    _money_cell(book, ws, row, 8, envelope.period_withdrawn)
+    _money_cell(book, ws, row, 2, _as_report(envelope.deposited, code, currency_code))
+    _money_cell(book, ws, row, 3, _as_report(envelope.spent, code, currency_code))
+    _money_cell(book, ws, row, 4, _as_report(envelope.withdrawn, code, currency_code))
+    _money_cell(book, ws, row, 5, _as_report(envelope.balance, code, currency_code))
+    _money_cell(book, ws, row, 6, _as_report(envelope.period_deposited, code, currency_code))
+    _money_cell(book, ws, row, 7, _as_report(envelope.period_spent, code, currency_code))
+    _money_cell(book, ws, row, 8, _as_report(envelope.period_withdrawn, code, currency_code))
+    ws.write(row, 9, format_money(envelope.balance, code), book.text)
 
 
 def _write_tx(book: _Book, ws, row: int, item: Tx, with_month: bool) -> None:
@@ -772,7 +800,8 @@ def _write_ledger(book: _Book, ws, row: int, entry: LedgerTx, with_month: bool) 
     ws.write(row, col, entry.title, book.text)
     ws.write(row, col + 1, 'конверт' if entry.is_envelope else 'цель', book.text)
     ws.write(row, col + 2, ENTRY.get(entry.entry_type, entry.entry_type), book.text)
-    _journal_money(book, ws, row, col + 3, entry.amount)
+    shown = entry.report_amount if entry.report_amount is not None else entry.amount
+    _journal_money(book, ws, row, col + 3, shown)
     ws.write(row, col + 4, entry.comment, book.text)
 
 
@@ -832,6 +861,19 @@ def _chart_title_font() -> dict:
 def _section(book: _Book, ws, row: int, title: str) -> int:
     ws.write(row, 0, title, book.section)
     return row + 1
+
+
+def _as_report(amount: Decimal, source: str, report_code: str) -> Decimal:
+    """Колонки резерва — в валюте отчёта. Процент цели считается раньше, в её валюте."""
+    if source == report_code:
+        return amount
+    from transactions.booking import convert_signed
+    from transactions.exchange import ExchangeRateUnavailable
+
+    try:
+        return convert_signed(amount, source, report_code)
+    except ExchangeRateUnavailable:
+        return amount
 
 
 def _money_cell(book: _Book, ws, row: int, col: int, value: Decimal | None) -> None:

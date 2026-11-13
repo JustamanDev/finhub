@@ -10,7 +10,7 @@ class DebtPaymentInline(admin.TabularInline):
 
 @admin.register(Debt)
 class DebtAdmin(admin.ModelAdmin):
-    list_display = ['counterparty', 'user', 'direction', 'principal', 'is_open']
+    list_display = ['counterparty', 'user', 'direction', 'principal', 'currency', 'is_open']
     list_filter = ['direction', 'is_open']
     search_fields = ['counterparty', 'user__username']
     inlines = [DebtPaymentInline]
