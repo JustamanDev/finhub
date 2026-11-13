@@ -17,6 +17,7 @@ from telegram_bot.handlers.text_handler import TextHandler
 from telegram_bot.handlers.voice_handler import VoiceHandler
 from telegram_bot.handlers.callback_handler import CallbackHandler
 from telegram_bot.handlers.command_handler import CommandHandler as BotCommandHandler
+from telegram_bot.services.goal_watch import goal_watch_loop
 from telegram_bot.services.recurring_reminders import recurring_reminder_loop
 from telegram_bot.services.weekly_digest import weekly_digest_loop
 from telegram_bot.utils.admin_alerts import notify_admins_about_exception
@@ -268,6 +269,9 @@ class Command(BaseCommand):
             recurring_task = asyncio.create_task(
                 recurring_reminder_loop(application.bot),
             )
+            goal_watch_task = asyncio.create_task(
+                goal_watch_loop(application.bot),
+            )
             
             # Ждем остановки
             try:
@@ -279,12 +283,17 @@ class Command(BaseCommand):
             finally:
                 digest_task.cancel()
                 recurring_task.cancel()
+                goal_watch_task.cancel()
                 try:
                     await digest_task
                 except asyncio.CancelledError:
                     pass
                 try:
                     await recurring_task
+                except asyncio.CancelledError:
+                    pass
+                try:
+                    await goal_watch_task
                 except asyncio.CancelledError:
                     pass
                 await application.stop()
