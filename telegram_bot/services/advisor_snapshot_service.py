@@ -80,8 +80,12 @@ class AdvisorSnapshotService:
         )
         comparison = self._build_comparison(report, prev_report, free_funds, prev_free)
 
+        from transactions.currencies import base_for_user
+
+        report_currency = await sync_to_async(base_for_user)(self.user)
         snapshot: dict[str, Any] = {
             'as_of': today.isoformat(),
+            'report_currency': report_currency,
             'period': {
                 'year': year,
                 'month': month,
@@ -601,10 +605,12 @@ class AdvisorSnapshotService:
                 continue
             totals = await sync_to_async(ledger_totals, thread_sensitive=True)(goal.id)
             balance = max(totals.balance, Decimal('0'))
+            code = goal.currency or 'RUB'
             if goal.is_envelope:
                 rows.append({
                     'title': goal.title,
                     'kind': 'envelope',
+                    'currency': code,
                     'target': None,
                     'balance': _money(balance),
                     'progress_percent': None,
@@ -631,6 +637,7 @@ class AdvisorSnapshotService:
             rows.append({
                 'title': goal.title,
                 'kind': 'savings',
+                'currency': code,
                 'target': _money(target),
                 'balance': _money(balance),
                 'progress_percent': progress,

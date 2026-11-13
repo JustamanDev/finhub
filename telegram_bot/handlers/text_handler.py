@@ -101,56 +101,58 @@ class TextHandler(BaseHandler):
 
         if step == 'deposit':
             lowered = text.lower()
+            named = None
             if lowered in {'пусто', 'пустой', 'пока пустой', '0', 'пропустить'}:
                 amount = Decimal('0')
             else:
-                try:
-                    amount = self._parse_money(text)
-                except (InvalidOperation, ValueError):
+                from telegram_bot.utils.amount_text import split_amount
+
+                parsed = split_amount(text)
+                if parsed is None:
                     await update.message.reply_text(
                         "❌ Неверная сумма. Пример: **10000** или кнопка «Пока пустой».",
                         reply_markup=GoalsKeyboard.get_goal_input_keyboard(cancel_callback="goals_menu"),
                         parse_mode='Markdown',
                     )
                     return
-                if amount < 0:
-                    await update.message.reply_text(
-                        "❌ Сумма не может быть отрицательной.",
-                        reply_markup=GoalsKeyboard.get_goal_input_keyboard(cancel_callback="goals_menu"),
-                        parse_mode='Markdown',
-                    )
-                    return
-            await self._finish_envelope(update, context, telegram_user, data.get('title'), amount)
+                amount, named = parsed
+            await self._ask_envelope_currency(
+                update, context, telegram_user, data.get('title'), amount, named,
+            )
+            return
+
+        if step == 'currency':
+            await update.message.reply_text('Выберите валюту кнопкой или нажмите «Отмена».')
             return
 
         if step == 'amount':
-            try:
-                amount = self._parse_money(text)
-            except (InvalidOperation, ValueError):
+            from telegram_bot.services.book_currency import take_or_ask
+            from telegram_bot.utils.amount_text import split_amount
+
+            parsed = split_amount(text)
+            if parsed is None:
                 await update.message.reply_text(
-                    "❌ Неверный формат суммы.\n\nПримеры: **100000**, **250000.50**",
+                    "❌ Неверный формат суммы.\n\nПримеры: **100000**, **250000.50**, **1000 долларов**",
                     reply_markup=GoalsKeyboard.get_goal_input_keyboard(cancel_callback="goals_menu"),
                     parse_mode='Markdown',
                 )
                 return
-
-            if amount <= 0:
-                await update.message.reply_text(
-                    "❌ Сумма должна быть больше нуля.\n\nПример: **100000**",
-                    reply_markup=GoalsKeyboard.get_goal_input_keyboard(cancel_callback="goals_menu"),
-                    parse_mode='Markdown',
-                )
-                return
-
-            data['target_amount'] = str(amount)
-            context.user_data['goal_creation_data'] = data
-            context.user_data['goal_creation_step'] = 'deadline'
-
-            await update.message.reply_text(
-                "📅 Введите дедлайн (ДД.MM.YYYY) или напишите **«без срока»**:",
-                reply_markup=GoalsKeyboard.get_goal_input_keyboard(cancel_callback="goals_menu"),
-                parse_mode='Markdown',
+            amount, named = parsed
+            chosen = await take_or_ask(
+                update,
+                context,
+                telegram_user,
+                amount,
+                kind='goal_target',
+                payload={},
+                named=named,
             )
+            if chosen is None:
+                context.user_data['goal_creation_step'] = 'currency'
+                return
+            from telegram_bot.services.book_currency import _continue_goal_deadline
+
+            await _continue_goal_deadline(update, context, amount, chosen)
             return
 
         if step == 'deadline':
@@ -194,6 +196,7 @@ class TextHandler(BaseHandler):
                     title=title,
                     target_amount=target_amount,
                     deadline=deadline,
+                    currency=data.get('currency'),
                 )
             except GoalTitleTaken as exc:
                 context.user_data['goal_creation_step'] = 'title'
@@ -244,6 +247,32 @@ class TextHandler(BaseHandler):
             parse_mode='Markdown',
         )
 
+    async def _ask_envelope_currency(
+        self,
+        update: Update,
+        context: ContextTypes.DEFAULT_TYPE,
+        telegram_user,
+        title: str,
+        amount: Decimal,
+        named: str | None,
+    ) -> None:
+        from telegram_bot.services.book_currency import take_or_ask
+
+        chosen = await take_or_ask(
+            update,
+            context,
+            telegram_user,
+            amount if amount > 0 else Decimal('0'),
+            kind='envelope_open',
+            payload={'title': title or '', 'deposit': str(amount)},
+            named=named,
+            prompt=None if amount > 0 else 'В какой валюте конверт?',
+        )
+        if chosen is None:
+            context.user_data['goal_creation_step'] = 'currency'
+            return
+        await self._finish_envelope(update, context, telegram_user, title, amount, chosen)
+
     async def _finish_envelope(
         self,
         update: Update,
@@ -251,6 +280,7 @@ class TextHandler(BaseHandler):
         telegram_user,
         title: str,
         amount: Decimal,
+        currency: str | None = None,
     ) -> None:
         from telegram_bot.handlers.goals_handler import GoalsHandler
         from telegram_bot.keyboards.goals import GoalsKeyboard
@@ -259,26 +289,69 @@ class TextHandler(BaseHandler):
         if len(title) < 2:
             context.user_data['goal_creation_step'] = 'title'
             context.user_data['goal_creation_data'] = {'kind': 'envelope'}
-            await update.message.reply_text(
+            await update.effective_chat.send_message(
                 "❌ Название потерялось. Введите его ещё раз.",
                 reply_markup=GoalsKeyboard.get_goal_input_keyboard(cancel_callback="goals_menu"),
             )
             return
         user = await sync_to_async(lambda: telegram_user.user)()
         try:
-            goal = await GoalService(user).create_envelope(title, amount)
+            goal = await GoalService(user).create_envelope(title, amount, currency=currency)
         except GoalTitleTaken as exc:
             context.user_data['goal_creation_step'] = 'title'
             context.user_data['goal_creation_data'] = {'kind': 'envelope'}
-            await update.message.reply_text(
+            await update.effective_chat.send_message(
                 f"❌ {exc}\n\nВведите другое название:",
                 reply_markup=GoalsKeyboard.get_goal_input_keyboard(cancel_callback="goals_menu"),
             )
             return
         context.user_data.pop('goal_creation_step', None)
         context.user_data.pop('goal_creation_data', None)
-        await update.message.reply_text("✅ Конверт создан.")
+        await update.effective_chat.send_message("✅ Конверт создан.")
         await GoalsHandler().handle_goal_view(update, context, telegram_user, goal.id)
+
+    async def _apply_goal_movement(
+        self,
+        update: Update,
+        context: ContextTypes.DEFAULT_TYPE,
+        telegram_user,
+        goal_id: int,
+        amount: Decimal,
+        currency: str,
+        *,
+        withdraw: bool,
+    ) -> None:
+        from telegram_bot.handlers.goals_handler import GoalsHandler
+        from transactions.currencies import format_money
+        from transactions.exchange import ExchangeRateUnavailable
+
+        user = await sync_to_async(lambda: telegram_user.user)()
+        service = GoalService(user)
+        try:
+            if withdraw:
+                entry = await service.add_withdraw(
+                    goal_id, amount, source_currency=currency,
+                )
+            else:
+                entry = await service.add_deposit(
+                    goal_id, amount, source_currency=currency,
+                )
+        except (ExchangeRateUnavailable, ValueError) as exc:
+            await update.effective_chat.send_message(str(exc))
+            return
+        context.user_data.pop('goal_deposit_goal_id', None)
+        context.user_data.pop('goal_withdraw_goal_id', None)
+        if not entry:
+            await update.effective_chat.send_message('❌ Цель не найдена.')
+            return
+        goal = await service.get_goal(goal_id)
+        code = goal.currency if goal else currency
+        verb = 'Снято' if withdraw else 'Внесено'
+        shown = format_money(abs(entry.amount), code)
+        if currency != code:
+            shown = f'{format_money(amount, currency)} → {shown}'
+        await update.effective_chat.send_message(f'✅ {verb} {shown}')
+        await GoalsHandler().handle_goal_view(update, context, telegram_user, goal_id)
 
     async def _handle_goal_deposit_input(
         self,
@@ -290,23 +363,28 @@ class TextHandler(BaseHandler):
     ) -> None:
         from telegram_bot.handlers.goals_handler import GoalsHandler
 
-        try:
-            amount = self._parse_money(message_text)
-            if amount <= 0:
-                raise ValueError("amount<=0")
-            user = await sync_to_async(lambda: telegram_user.user)()
-            service = GoalService(user)
-            entry = await service.add_deposit(goal_id, amount)
-            if not entry:
-                await update.message.reply_text("❌ Цель не найдена.")
-                return
-            await update.message.reply_text(f"✅ Внесено {amount:,.0f} ₽")
-            handler = GoalsHandler()
-            await handler.handle_goal_view(update, context, telegram_user, goal_id)
-        except Exception:
+        from telegram_bot.services.book_currency import take_or_ask
+        from telegram_bot.utils.amount_text import split_amount
+
+        parsed = split_amount(message_text)
+        if parsed is None:
             await update.message.reply_text("❌ Неверная сумма. Пример: 5000 или 499.90")
-        finally:
-            context.user_data.pop('goal_deposit_goal_id', None)
+            return
+        amount, named = parsed
+        chosen = await take_or_ask(
+            update,
+            context,
+            telegram_user,
+            amount,
+            kind='goal_deposit',
+            payload={'goal_id': goal_id},
+            named=named,
+        )
+        if chosen is None:
+            return
+        await self._apply_goal_movement(
+            update, context, telegram_user, goal_id, amount, chosen, withdraw=False,
+        )
 
     async def _handle_voice_goal_pending_text(
         self,
@@ -379,23 +457,28 @@ class TextHandler(BaseHandler):
     ) -> None:
         from telegram_bot.handlers.goals_handler import GoalsHandler
 
-        try:
-            amount = self._parse_money(message_text)
-            if amount <= 0:
-                raise ValueError("amount<=0")
-            user = await sync_to_async(lambda: telegram_user.user)()
-            service = GoalService(user)
-            entry = await service.add_withdraw(goal_id, amount)
-            if not entry:
-                await update.message.reply_text("❌ Цель не найдена.")
-                return
-            await update.message.reply_text(f"✅ Снято {amount:,.0f} ₽")
-            handler = GoalsHandler()
-            await handler.handle_goal_view(update, context, telegram_user, goal_id)
-        except Exception:
+        from telegram_bot.services.book_currency import take_or_ask
+        from telegram_bot.utils.amount_text import split_amount
+
+        parsed = split_amount(message_text)
+        if parsed is None:
             await update.message.reply_text("❌ Неверная сумма. Пример: 5000 или 499.90")
-        finally:
-            context.user_data.pop('goal_withdraw_goal_id', None)
+            return
+        amount, named = parsed
+        chosen = await take_or_ask(
+            update,
+            context,
+            telegram_user,
+            amount,
+            kind='goal_withdraw',
+            payload={'goal_id': goal_id},
+            named=named,
+        )
+        if chosen is None:
+            return
+        await self._apply_goal_movement(
+            update, context, telegram_user, goal_id, amount, chosen, withdraw=True,
+        )
     
     async def handle_text_message(
         self,
@@ -428,6 +511,17 @@ class TextHandler(BaseHandler):
             telegram_user = await self.get_or_create_telegram_user(
                 update.effective_user
             )
+
+            from telegram_bot.services.book_currency import PENDING_KEY, _drop_draft
+
+            if context.user_data.get(PENDING_KEY):
+                if message_text.lower() in {'отмена', 'cancel'}:
+                    pending = context.user_data.pop(PENDING_KEY, None) or {}
+                    _drop_draft(context, pending.get('kind'))
+                    await update.message.reply_text('Хорошо, эту сумму не записал.')
+                    return
+                await update.message.reply_text('Выберите валюту кнопкой или нажмите «Отмена».')
+                return
 
             # --- Переименование категории ---
             # Если установлен флаг renaming_category_id, любое сообщение

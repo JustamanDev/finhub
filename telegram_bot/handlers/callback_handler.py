@@ -51,7 +51,16 @@ class CallbackHandler(BaseHandler):
             )
             
             # Обрабатываем callback по типу
-            if query.data == 'voice_confirm_yes':
+            if query.data == 'book_currency_cancel' or (
+                query.data.startswith('book_currency_')
+            ):
+                from telegram_bot.services.book_currency import apply_choice
+
+                code = None
+                if query.data != 'book_currency_cancel':
+                    code = query.data.removeprefix('book_currency_')
+                await apply_choice(update, context, telegram_user, code)
+            elif query.data == 'voice_confirm_yes':
                 await self._handle_voice_confirm(
                     update,
                     query,
@@ -165,6 +174,7 @@ class CallbackHandler(BaseHandler):
                 )
             elif query.data == 'envelope_skip_deposit':
                 await self._handle_envelope_skip_deposit(
+                    update,
                     query,
                     context,
                     telegram_user,
@@ -834,12 +844,12 @@ class CallbackHandler(BaseHandler):
         if not goals:
             await query.answer('Активных целей и конвертов нет.')
             return
-        from transactions.currencies import base_currency_of, symbol_of
+        from transactions.currencies import symbol_of
 
-        sym = symbol_of(base_currency_of(telegram_user))
         buttons = []
         for goal, balance in goals:
             icon = '📦' if goal.is_envelope else '🎯'
+            sym = symbol_of(goal.currency or 'RUB')
             label = f'{icon} {goal.title} · {balance:,.0f} {sym}'
             buttons.append([
                 InlineKeyboardButton(
@@ -1847,6 +1857,7 @@ class CallbackHandler(BaseHandler):
 
     async def _handle_envelope_skip_deposit(
         self,
+        update: Update,
         query: CallbackQuery,
         context: ContextTypes.DEFAULT_TYPE,
         telegram_user,
@@ -1860,9 +1871,24 @@ class CallbackHandler(BaseHandler):
         if context.user_data.get('goal_creation_step') != 'deposit' or not title:
             await query.answer('Сначала введите название')
             return
+        from telegram_bot.services.book_currency import take_or_ask
+
+        chosen = await take_or_ask(
+            update,
+            context,
+            telegram_user,
+            Decimal('0'),
+            kind='envelope_open',
+            payload={'title': title, 'deposit': '0'},
+            prompt='В какой валюте конверт?',
+        )
+        if chosen is None:
+            context.user_data['goal_creation_step'] = 'currency'
+            await query.answer()
+            return
         user = await sync_to_async(lambda: telegram_user.user)()
         try:
-            goal = await GoalService(user).create_envelope(title)
+            goal = await GoalService(user).create_envelope(title, currency=chosen)
         except GoalTitleTaken as exc:
             await query.answer(str(exc), show_alert=True)
             return
@@ -2000,10 +2026,21 @@ class CallbackHandler(BaseHandler):
         from asgiref.sync import sync_to_async
         from telegram_bot.handlers.goals_handler import GoalsHandler
         from telegram_bot.services.goal_service import GoalService
+        from transactions.currencies import base_currency_of
+        from transactions.exchange import ExchangeRateUnavailable
 
         user = await sync_to_async(lambda: telegram_user.user)()
         service = GoalService(user)
-        entry = await service.add_deposit(goal_id, Decimal(amount))
+        base = await sync_to_async(base_currency_of)(telegram_user)
+        try:
+            entry = await service.add_deposit(
+                goal_id,
+                Decimal(amount),
+                source_currency=base,
+            )
+        except (ExchangeRateUnavailable, ValueError) as exc:
+            await query.answer(str(exc)[:180], show_alert=True)
+            return
         if not entry:
             await query.answer("Цель не найдена")
             return

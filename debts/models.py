@@ -9,6 +9,7 @@ from django.db.models import Sum
 from django.db.models.functions import Coalesce
 
 from core.models import TimestampedModel
+from transactions.currencies import CURRENCY_CHOICES, RUB
 
 
 class Debt(TimestampedModel):
@@ -34,6 +35,13 @@ class Debt(TimestampedModel):
         choices=DIRECTION_CHOICES,
     )
     principal = models.DecimalField('Сумма', max_digits=12, decimal_places=2)
+    currency = models.CharField(
+        'Валюта',
+        max_length=3,
+        choices=CURRENCY_CHOICES,
+        default=RUB,
+        help_text='В ней сумма и платежи. В отчёте остаток переводится в базовую.',
+    )
     is_open = models.BooleanField('Открыт', default=True)
 
     class Meta:
@@ -70,7 +78,21 @@ class DebtPayment(TimestampedModel):
         related_name='payments',
         verbose_name='Долг',
     )
-    amount = models.DecimalField('Сумма', max_digits=12, decimal_places=2)
+    amount = models.DecimalField(
+        'Сумма',
+        max_digits=12,
+        decimal_places=2,
+        help_text='В валюте долга.',
+    )
+    input_amount = models.DecimalField(
+        'Сумма ввода',
+        max_digits=14,
+        decimal_places=2,
+        null=True,
+        blank=True,
+        help_text='Как заплатили, если валюта платежа отличается от валюты долга.',
+    )
+    input_currency = models.CharField('Валюта ввода', max_length=3, blank=True, default='')
     paid_on = models.DateField('Дата')
 
     class Meta:

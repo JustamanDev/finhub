@@ -13,6 +13,7 @@ class GoalAdmin(admin.ModelAdmin):
         'user',
         'title',
         'kind',
+        'currency',
         'target_amount',
         'deadline',
         'status',

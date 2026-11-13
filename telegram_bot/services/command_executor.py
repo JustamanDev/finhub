@@ -226,8 +226,20 @@ class CommandExecutor:
             return inputs[0]
         return base
 
+    async def _named_goal_currency(self, telegram_user, command: ParsedVoiceCommand) -> str | None:
+        """Валюта, названная в команде цели. Нет пометки — None, цель остаётся в своей."""
+        from telegram_bot.utils.currency_text import detect_currency_mention
+
+        base, inputs = await sync_to_async(prefs_tuple)(telegram_user)
+        currency = command.currency
+        if currency not in inputs and currency != base:
+            currency = detect_currency_mention(command.raw_transcript)
+        if currency not in inputs and currency != base:
+            return None
+        return currency
+
     async def _store_vnd_amount_as_rub(self, telegram_user, command: ParsedVoiceCommand) -> None:
-        """Лимиты и цели хранятся в базовой валюте. Чужую валюту пересчитываем."""
+        """Лимит хранится в базовой валюте. Чужую валюту пересчитываем."""
         from telegram_bot.utils.currency_text import detect_currency_mention
         from transactions.exchange import convert_magnitude
 
@@ -445,8 +457,6 @@ class CommandExecutor:
             execute_goal_withdraw,
         )
 
-        await self._store_vnd_amount_as_rub(telegram_user, command)
-
         action = command.goal_action
         if action not in {
             GOAL_ACTION_CREATE,
@@ -474,6 +484,7 @@ class CommandExecutor:
             return
 
         user = await sync_to_async(lambda: telegram_user.user)()
+        named = await self._named_goal_currency(telegram_user, command)
         try:
             if action == GOAL_ACTION_CREATE:
                 title = (command.goal_title or '').strip()
@@ -485,7 +496,12 @@ class CommandExecutor:
                         voice_transcript=command.raw_transcript,
                     )
                     return
-                result = await execute_goal_create(user, title, command.amount)
+                result = await execute_goal_create(
+                    user,
+                    title,
+                    command.amount,
+                    currency=named,
+                )
             else:
                 if command.goal is None:
                     await self.prompt_goal_resolution(
@@ -495,17 +511,20 @@ class CommandExecutor:
                         command,
                     )
                     return
+                source = named or command.goal.currency
                 if action == GOAL_ACTION_DEPOSIT:
                     result = await execute_goal_deposit(
                         user,
                         command.goal,
                         command.amount,
+                        source_currency=source,
                     )
                 else:
                     result = await execute_goal_withdraw(
                         user,
                         command.goal,
                         command.amount,
+                        source_currency=source,
                     )
         except ValueError as exc:
             await self.send_error(
@@ -649,25 +668,28 @@ class CommandExecutor:
         lines: list[str] = []
         if voice_transcript:
             lines.append(f'🎤 Распознано: «{voice_transcript}»')
+        from transactions.currencies import format_money
+
+        code = result.goal.currency or 'RUB'
         if result.action == GOAL_ACTION_CREATE:
             lines.append(
                 f'✅ Цель создана: {result.goal.title} — '
-                f'{result.goal.target_amount:,.0f}₽',
+                f'{format_money(result.goal.target_amount, code)}',
             )
         elif result.action == GOAL_ACTION_DEPOSIT:
             lines.append(
-                f'✅ Пополнено {result.entry.amount:,.0f}₽ → '
+                f'✅ Пополнено {format_money(result.entry.amount, code)} → '
                 f'{result.goal.title}',
             )
             if result.balance is not None:
-                lines.append(f'Баланс: {result.balance:,.0f}₽')
+                lines.append(f'Баланс: {format_money(result.balance, code)}')
         elif result.action == GOAL_ACTION_WITHDRAW:
             lines.append(
-                f'✅ Снято {abs(result.entry.amount):,.0f}₽ с '
+                f'✅ Снято {format_money(abs(result.entry.amount), code)} с '
                 f'{result.goal.title}',
             )
             if result.balance is not None:
-                lines.append(f'Баланс: {result.balance:,.0f}₽')
+                lines.append(f'Баланс: {format_money(result.balance, code)}')
 
         keyboard = InlineKeyboardMarkup([
             [

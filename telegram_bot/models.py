@@ -38,7 +38,7 @@ class TelegramUser(TimestampedModel):
         max_length=3,
         choices=CURRENCY_CHOICES,
         default=RUB,
-        help_text='В ней отчёты, лимиты и цели.',
+        help_text='В ней отчёты и лимиты. Цели, конверты и долги хранят свою валюту.',
     )
     input_currencies = models.JSONField(
         'Валюты ввода',

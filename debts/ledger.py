@@ -6,13 +6,41 @@ from decimal import Decimal
 from debts.models import Debt, DebtPayment
 
 
-def add_payment(debt: Debt, amount: Decimal, paid_on: date) -> DebtPayment:
-    """Уменьшает остаток. Если он стал нулём, долг закрывается."""
+def add_payment(
+    debt: Debt,
+    amount: Decimal,
+    paid_on: date,
+    source_currency: str | None = None,
+) -> DebtPayment:
+    """Уменьшает остаток. Если он стал нулём, долг закрывается.
+
+    amount — как ввели. Если валюта ввода не совпадает с валютой долга,
+    в долг пишется эквивалент по курсу ЦБ, а исходная сумма остаётся на платеже.
+    """
+    from transactions.currencies import RUB, is_known
+    from transactions.exchange import convert_magnitude
+
     if amount <= 0:
         raise ValueError('Платёж должен быть больше нуля.')
-    if amount > debt.remaining:
+    debt_currency = debt.currency if is_known(debt.currency) else RUB
+    source = source_currency if is_known(source_currency) else debt_currency
+    input_amount = None
+    input_currency = ''
+    if source == debt_currency:
+        native = Decimal(amount)
+    else:
+        native = convert_magnitude(amount, source, debt_currency)
+        input_amount = Decimal(amount)
+        input_currency = source
+    if native > debt.remaining:
         raise ValueError('Платёж больше остатка.')
-    payment = DebtPayment.objects.create(debt=debt, amount=amount, paid_on=paid_on)
+    payment = DebtPayment.objects.create(
+        debt=debt,
+        amount=native,
+        paid_on=paid_on,
+        input_amount=input_amount,
+        input_currency=input_currency,
+    )
     debt.refresh_from_db()
     if debt.remaining <= 0:
         debt.is_open = False
@@ -21,19 +49,15 @@ def add_payment(debt: Debt, amount: Decimal, paid_on: date) -> DebtPayment:
 
 
 def obligation_lines(user) -> list[str]:
-    """Строки блока «Долги». Повторов здесь нет."""
-    from transactions.currencies import base_for_user, symbol_of
+    """Строки блока «Долги». Остаток — в валюте долга, рядом эквивалент отчёта."""
+    from transactions.booking import native_with_base
+    from transactions.currencies import base_for_user
 
-    currency = base_for_user(user)
-
-    def money(amount: Decimal) -> str:
-        whole = int(Decimal(amount).quantize(Decimal('1')))
-        grouped = f'{abs(whole):,}'.replace(',', ' ')
-        return f'{grouped} {symbol_of(currency)}'
-
+    base = base_for_user(user)
     lines = []
     debts = Debt.objects.filter(user=user, is_open=True).order_by('counterparty', 'id')
     for debt in debts:
         side = 'я должен' if debt.direction == Debt.OWE else 'мне должны'
-        lines.append(f'{debt.counterparty} — {side}, осталось {money(debt.remaining)}')
+        left = native_with_base(debt.remaining, debt.currency, base)
+        lines.append(f'{debt.counterparty} — {side}, осталось {left}')
     return lines

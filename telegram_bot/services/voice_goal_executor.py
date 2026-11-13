@@ -36,6 +36,7 @@ async def execute_goal_create(
     user: User,
     title: str,
     target_amount: Decimal,
+    currency: str | None = None,
 ) -> GoalActionResult:
     title = (title or '').strip()
     if not title:
@@ -52,7 +53,7 @@ async def execute_goal_create(
     if existing:
         raise ValueError(f'Цель «{existing.title}» уже существует.')
 
-    goal = await GoalService(user).create_goal(title, amount)
+    goal = await GoalService(user).create_goal(title, amount, currency=currency)
     return GoalActionResult(goal=goal, action=GOAL_ACTION_CREATE)
 
 
@@ -60,12 +61,17 @@ async def execute_goal_deposit(
     user: User,
     goal: Goal,
     amount: Decimal,
+    source_currency: str | None = None,
 ) -> GoalActionResult:
     amount = Decimal(str(amount)).copy_abs()
     if amount <= 0:
         raise ValueError('Сумма пополнения должна быть больше нуля.')
     service = GoalService(user)
-    entry = await service.add_deposit(goal.id, amount)
+    entry = await service.add_deposit(
+        goal.id,
+        amount,
+        source_currency=source_currency or goal.currency,
+    )
     if entry is None:
         raise ValueError('Цель не найдена.')
     balance = await service.get_goal_balance(goal.id)
@@ -81,17 +87,17 @@ async def execute_goal_withdraw(
     user: User,
     goal: Goal,
     amount: Decimal,
+    source_currency: str | None = None,
 ) -> GoalActionResult:
     amount = Decimal(str(amount)).copy_abs()
     if amount <= 0:
         raise ValueError('Сумма снятия должна быть больше нуля.')
     service = GoalService(user)
-    balance = await service.get_goal_balance(goal.id)
-    if amount > balance:
-        raise ValueError(
-            f'Недостаточно средств на цели (доступно {balance:,.0f}₽).',
-        )
-    entry = await service.add_withdraw(goal.id, amount)
+    entry = await service.add_withdraw(
+        goal.id,
+        amount,
+        source_currency=source_currency or goal.currency,
+    )
     if entry is None:
         raise ValueError('Цель не найдена.')
     new_balance = await service.get_goal_balance(goal.id)

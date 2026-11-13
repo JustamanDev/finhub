@@ -80,8 +80,9 @@ class GoalsHandler(BaseHandler):
         goal = data['goal']
         from transactions.currencies import base_currency_of
 
-        currency = await sync_to_async(base_currency_of)(telegram_user)
-        lines = self._card_lines(data, currency)
+        base = await sync_to_async(base_currency_of)(telegram_user)
+        goal_currency = goal.currency or base
+        lines = self._card_lines(data, goal_currency, base)
         quick_amount = None
         if goal.status != goal.ARCHIVED and not goal.is_envelope:
             recs = data['recommendations']
@@ -107,14 +108,21 @@ class GoalsHandler(BaseHandler):
 
             keyboard = attach_persistent_navigation(keyboard, back_callback="goals_archive")
         else:
-            keyboard = GoalsKeyboard.get_goal_card_keyboard(goal_id, quick_amount=quick_amount)
+            from transactions.currencies import symbol_of
+
+            keyboard = GoalsKeyboard.get_goal_card_keyboard(
+                goal_id,
+                quick_amount=quick_amount,
+                quick_symbol=symbol_of(base),
+            )
         await self._send_or_edit_message(update, context, "\n".join(lines), keyboard)
 
     @staticmethod
-    def _card_lines(data: dict, currency: str = 'RUB') -> list[str]:
+    def _card_lines(data: dict, currency: str = 'RUB', base_currency: str = 'RUB') -> list[str]:
         from transactions.currencies import symbol_of
 
         sym = symbol_of(currency)
+        base_sym = symbol_of(base_currency)
         goal = data['goal']
         balance = data['balance']
         free_funds = data['free_funds_this_month']
@@ -169,7 +177,9 @@ class GoalsHandler(BaseHandler):
                     lines.extend(eta_lines)
 
         lines.append("")
-        lines.append(f"🧾 Свободно для трат в этом месяце: **{free_funds:,.0f} {sym}**")
+        lines.append(
+            f"🧾 Свободно для трат в этом месяце: **{free_funds:,.0f} {base_sym}**"
+        )
         return lines
 
     async def handle_goal_history(
@@ -191,9 +201,9 @@ class GoalsHandler(BaseHandler):
             )
             return
 
-        from transactions.currencies import base_currency_of, symbol_of
+        from transactions.currencies import symbol_of
 
-        sym = symbol_of(await sync_to_async(base_currency_of)(telegram_user))
+        sym = symbol_of(goal.currency or 'RUB')
         entries = await service.get_recent_entries(goal_id, limit=20)
         message = f"🕓 **История: {goal.title}**\n\n"
         if not entries:
@@ -266,9 +276,9 @@ class GoalsHandler(BaseHandler):
         if not goal:
             await self.handle_goals_list(update, context, telegram_user)
             return
-        from transactions.currencies import base_currency_of, symbol_of
+        from transactions.currencies import symbol_of
 
-        sym = symbol_of(await sync_to_async(base_currency_of)(telegram_user))
+        sym = symbol_of(goal.currency or 'RUB')
         balance = await service.get_goal_balance(goal_id)
         name = "конверт" if goal.is_envelope else "цель"
         lines = [f"🗄 **Убрать {name} «{goal.title}» в архив?**", ""]
