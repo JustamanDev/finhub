@@ -775,6 +775,12 @@ class CommandExecutor:
             reply_markup=keyboard,
             fallback_hint='Меню под ответом.',
         )
+        if result.answer.answer_kind == 'clarify':
+            from telegram_bot.services.advisor_mode import (
+                hold_advisor_clarification,
+            )
+
+            hold_advisor_clarification(context, question)
         try:
             await status.delete()
         except Exception:

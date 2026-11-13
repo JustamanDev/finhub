@@ -6,7 +6,9 @@ import time
 from typing import Any
 
 ADVISOR_ARMED_KEY = 'advisor_armed_until'
+ADVISOR_PENDING_KEY = 'advisor_pending_question'
 ADVISOR_ARM_SECONDS = 300
+_PENDING_LIMIT = 2000
 ADVISOR_ARM_CALLBACKS = frozenset({'ask_advisor', 'advisor_again'})
 
 ADVISOR_PROMPT_TEXT = (
@@ -23,12 +25,46 @@ ADVISOR_ENTRY_TEXT = (
 def arm_advisor_mode(context: Any, now: float | None = None) -> None:
     moment = time.time() if now is None else now
     context.user_data[ADVISOR_ARMED_KEY] = moment + ADVISOR_ARM_SECONDS
+    context.user_data.pop(ADVISOR_PENDING_KEY, None)
+
+
+def hold_advisor_clarification(
+    context: Any,
+    question: str,
+    now: float | None = None,
+) -> None:
+    """Уточнение не закрывает вопрос: следующий ответ продолжает его."""
+    data = getattr(context, 'user_data', None)
+    if not isinstance(data, dict):
+        return
+    moment = time.time() if now is None else now
+    data[ADVISOR_ARMED_KEY] = moment + ADVISOR_ARM_SECONDS
+    data[ADVISOR_PENDING_KEY] = (question or '').strip()[:_PENDING_LIMIT]
+
+
+def drop_advisor_question(context: Any) -> None:
+    data = getattr(context, 'user_data', None)
+    if isinstance(data, dict):
+        data.pop(ADVISOR_PENDING_KEY, None)
+
+
+def followup_question(context: Any, reply: str) -> str:
+    """Склеивает исходный вопрос и ответ на уточнение."""
+    data = getattr(context, 'user_data', None)
+    text = (reply or '').strip()
+    if not isinstance(data, dict):
+        return text
+    pending = str(data.pop(ADVISOR_PENDING_KEY, '') or '').strip()
+    if not pending or pending == text:
+        return text
+    return f'{pending}\n\nУточнение пользователя: {text}'
 
 
 def clear_advisor_mode(context: Any) -> None:
     data = getattr(context, 'user_data', None)
     if isinstance(data, dict):
         data.pop(ADVISOR_ARMED_KEY, None)
+        data.pop(ADVISOR_PENDING_KEY, None)
 
 
 def take_advisor_mode(context: Any, now: float | None = None) -> str:
@@ -42,7 +78,10 @@ def take_advisor_mode(context: Any, now: float | None = None) -> str:
         alive = float(until) >= moment
     except (TypeError, ValueError):
         alive = False
-    return 'active' if alive else 'expired'
+    if not alive:
+        data.pop(ADVISOR_PENDING_KEY, None)
+        return 'expired'
+    return 'active'
 
 
 def is_money_entry(text: str) -> bool:

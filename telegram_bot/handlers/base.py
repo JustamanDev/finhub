@@ -134,6 +134,7 @@ class BaseHandler:
             'voice_goal_pending',
             'voice_dialog',
             'advisor_armed_until',
+            'advisor_pending_question',
         ):
             context.user_data.pop(key, None)
 

@@ -110,6 +110,29 @@ class AdvisorModeTests(TestCase):
         self.assertNotIn(ADVISOR_ARMED_KEY, context.user_data)
         self.assertNotIn('voice_dialog', context.user_data)
 
+    def test_clarification_keeps_the_same_question(self):
+        from telegram_bot.services.advisor_mode import (
+            ADVISOR_PENDING_KEY,
+            followup_question,
+            hold_advisor_clarification,
+        )
+
+        context = type('Ctx', (), {'user_data': {}})()
+        hold_advisor_clarification(
+            context,
+            'Как накопить на визаран на Бали?',
+            now=1_000,
+        )
+        self.assertEqual(take_advisor_mode(context, now=1_100), 'active')
+        joined = followup_question(context, 'Да, визаран на Бали')
+        self.assertIn('Как накопить на визаран на Бали?', joined)
+        self.assertIn('Да, визаран на Бали', joined)
+        self.assertNotIn(ADVISOR_PENDING_KEY, context.user_data)
+
+        hold_advisor_clarification(context, 'старый вопрос', now=1_000)
+        arm_advisor_mode(context, now=1_000)
+        self.assertNotIn(ADVISOR_PENDING_KEY, context.user_data)
+
 
 class AdvisorPayloadTests(TestCase):
     def test_fact_drops_actions_and_extra_tables(self):
