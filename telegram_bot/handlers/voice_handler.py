@@ -176,6 +176,42 @@ class VoiceHandler(BaseHandler):
                 )
                 return
 
+            from telegram_bot.services.advisor_mode import (
+                ADVISOR_ENTRY_TEXT,
+                ADVISOR_EXPIRED_TEXT,
+                is_money_entry,
+                take_advisor_mode,
+            )
+            from telegram_bot.services.command_executor import CommandExecutor
+            from telegram_bot.voice.intents import ParsedVoiceCommand, VoiceIntentType
+
+            advisor_state = take_advisor_mode(context)
+            if advisor_state == 'expired':
+                await context.bot.send_message(
+                    chat_id=update.effective_chat.id,
+                    text=ADVISOR_EXPIRED_TEXT,
+                )
+                return
+            if advisor_state == 'active':
+                if is_money_entry(clean_transcript):
+                    await context.bot.send_message(
+                        chat_id=update.effective_chat.id,
+                        text=ADVISOR_ENTRY_TEXT,
+                    )
+                    return
+                await CommandExecutor().execute_ask_advisor(
+                    update,
+                    context,
+                    telegram_user,
+                    ParsedVoiceCommand(
+                        intent=VoiceIntentType.ASK_ADVISOR,
+                        success=True,
+                        confidence=1.0,
+                        raw_transcript=clean_transcript,
+                    ),
+                )
+                return
+
             def _interpret() -> ParsedVoiceCommand:
                 return VoiceInterpreter(user).interpret(clean_transcript)
 

@@ -11,6 +11,7 @@
 | [agent/roadmap.md](agent/roadmap.md) | Roadmap по фазам |
 | [agent/ideas.md](agent/ideas.md) | Идеи без утверждённой очереди |
 | [agent/product-strategy.md](agent/product-strategy.md) | Исследование рынка, предложение тарифов и рефералки, экономика запуска |
+| [agent/advisor-analyst.md](agent/advisor-analyst.md) | Финансист: промпт, кнопка, статья (в работе) |
 | [agent/voice-input.md](agent/voice-input.md) | План голосового ввода (MVP сдан) |
 | [agent/git-workflow.md](agent/git-workflow.md) | Ветки, коммиты, PR (по необходимости) |
 

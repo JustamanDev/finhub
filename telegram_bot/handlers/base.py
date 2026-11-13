@@ -133,6 +133,7 @@ class BaseHandler:
             'voice_category_pending',
             'voice_goal_pending',
             'voice_dialog',
+            'advisor_armed_until',
         ):
             context.user_data.pop(key, None)
 

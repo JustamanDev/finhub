@@ -186,6 +186,12 @@ class ActionKeyboard:
                     callback_data="debts_menu",
                 ),
             ],
+            [
+                InlineKeyboardButton(
+                    text="Финансист",
+                    callback_data="ask_advisor",
+                ),
+            ],
         ]
         
         return InlineKeyboardMarkup(buttons) 

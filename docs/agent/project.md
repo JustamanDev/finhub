@@ -30,7 +30,7 @@
 | `telegram_bot` | `TelegramUser` (`base_currency`, `input_currencies`), `UserState`, `BotText`, handlers, services |
 | `api` | URL routing v1 |
 
-**Не реализовано:** приложения `accounts`, `trading`, `analytics` и фронтенд. Повторы и долги есть. Список оставшихся идей: [ideas.md](ideas.md).
+**Не реализовано:** приложения `accounts`, `trading`, `analytics` и фронтенд. Повторы и долги есть. Список оставшихся идей: [ideas.md](ideas.md). Финансист собран в коде ветки: промпт `telegram_bot/prompts/advisor_analyst.txt`, план [advisor-analyst.md](advisor-analyst.md).
 
 ## Entry points
 

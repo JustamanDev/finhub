@@ -12,6 +12,7 @@
 | 4 | [docs/agent/conventions.md](docs/agent/conventions.md) | Куда класть код, паттерны |
 | 5 | [docs/agent/roadmap.md](docs/agent/roadmap.md) | Фазы и приоритеты |
 | 6 | [docs/agent/ideas.md](docs/agent/ideas.md) | Идеи, которые ещё не делаем |
+| — | [docs/agent/advisor-analyst.md](docs/agent/advisor-analyst.md) | Текущая работа: финансист |
 | — | [docs/agent/voice-input.md](docs/agent/voice-input.md) | Голос уже в проде, план как справочник |
 | — | [docs/agent/git-workflow.md](docs/agent/git-workflow.md) | Только при ветках / коммитах / PR |
 
@@ -27,7 +28,7 @@
 
 ## Активная разработка
 
-**Фаза:** бот в проде. Учёт, отчёты, цели и конверты, голос, консультант. Новая работа не начата.
+**Фаза:** бот в проде. Учёт, отчёты, цели и конверты, голос, консультант. Финансист собран в ветке `feature/advisor-analyst` и ещё не в проде. План: [docs/agent/advisor-analyst.md](docs/agent/advisor-analyst.md).
 
 Повторы и долги уже в боте, отдельными модулями. План: [docs/agent/recurring-and-debts.md](docs/agent/recurring-and-debts.md). Дальше без очереди: [docs/agent/ideas.md](docs/agent/ideas.md). План голоса, уже сданного: [docs/agent/voice-input.md](docs/agent/voice-input.md).
 
