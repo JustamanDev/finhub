@@ -49,6 +49,14 @@ class CallbackHandler(BaseHandler):
             telegram_user = await self.get_or_create_telegram_user(
                 update.effective_user
             )
+
+            from telegram_bot.services.advisor_mode import (
+                ADVISOR_ARM_CALLBACKS,
+                clear_advisor_mode,
+            )
+
+            if query.data not in ADVISOR_ARM_CALLBACKS:
+                clear_advisor_mode(context)
             
             # Обрабатываем callback по типу
             if query.data == 'book_currency_cancel' or (
@@ -514,6 +522,8 @@ class CallbackHandler(BaseHandler):
                     await self._send_transaction_confirmation(query, context, transaction)
                 except Exception:
                     await query.answer("Транзакция не найдена")
+            elif query.data in ('ask_advisor', 'advisor_again'):
+                await self._handle_ask_advisor(query, context, telegram_user)
             elif query.data == "main_menu":
                 logger.info("Вызываем _handle_main_menu")
                 await self._handle_main_menu(query, context, telegram_user)
@@ -1730,6 +1740,31 @@ class CallbackHandler(BaseHandler):
         await query.message.reply_text(
             text="🏠 Главное меню FinHub\n\nВыберите действие:",
             reply_markup=keyboard,
+        )
+
+    async def _handle_ask_advisor(
+        self,
+        query: CallbackQuery,
+        context: ContextTypes.DEFAULT_TYPE,
+        telegram_user,
+    ) -> None:
+        """Ждёт один вопрос финансисту, голосом или текстом."""
+        from telegram_bot.services.advisor_mode import (
+            ADVISOR_PROMPT_TEXT,
+            arm_advisor_mode,
+        )
+
+        del telegram_user
+        arm_advisor_mode(context)
+        await query.answer()
+        await query.message.reply_text(
+            text=ADVISOR_PROMPT_TEXT,
+            reply_markup=InlineKeyboardMarkup([
+                [InlineKeyboardButton(
+                    text='🏠 Главное меню',
+                    callback_data='main_menu',
+                )],
+            ]),
         )
 
     async def _handle_goals_menu(

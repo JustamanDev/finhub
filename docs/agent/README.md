@@ -5,7 +5,8 @@
 3. **[architecture.md](architecture.md)** — bot flows, layers
 4. **[conventions.md](conventions.md)** — where to put code
 5. **[roadmap.md](roadmap.md)** — phases
-6. **[voice-input.md](voice-input.md)** — active feature plan
-7. **[git-workflow.md](git-workflow.md)** — only for branches / commits / PR
+6. **[advisor-analyst.md](advisor-analyst.md)** — текущая работа: финансист
+7. **[voice-input.md](voice-input.md)** — голос уже в проде
+8. **[git-workflow.md](git-workflow.md)** — only for branches / commits / PR
 
 Root entry: [../../AGENTS.md](../../AGENTS.md)

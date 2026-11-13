@@ -1,10 +1,12 @@
-"""LLM answer for ASK_ADVISOR grounded in AdvisorSnapshotService facts."""
+"""LLM answer for ASK_ADVISOR: JSON по снимку, без выдуманных сумм."""
 
 from __future__ import annotations
 
 import json
 import logging
+import re
 import time
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
@@ -17,17 +19,58 @@ from telegram_bot.voice.openai_client import format_openai_error, get_openai_cli
 
 logger = logging.getLogger(__name__)
 
-PROMPT_PATH = Path(__file__).resolve().parent.parent / 'prompts' / 'advisor_answer.txt'
+PROMPT_PATH = Path(__file__).resolve().parent.parent / 'prompts' / 'advisor_analyst.txt'
 MAX_RETRIES = 3
-MAX_ANSWER_CHARS = 1200
+MAX_OUTPUT_TOKENS = 900
+MAX_ACTION_CHARS = 180
+ALLOWED_KINDS = frozenset({'fact', 'advice', 'clarify', 'decline'})
+ALLOWED_TABLES = frozenset({
+    'movement',
+    'categories',
+    'budgets',
+    'goals',
+    'goal_focus',
+    'trend',
+    'category',
+    'debts',
+    'recurring',
+})
 
 
-def _format_empty_snapshot_reply(snapshot: dict[str, Any]) -> str:
+@dataclass
+class AdvisorAnswer:
+    answer_kind: str
+    title: str
+    lead: str
+    body: str = ''
+    actions: list[str] = field(default_factory=list)
+    tables: list[str] = field(default_factory=list)
+    clarify: str | None = None
+
+
+@dataclass
+class AdvisorResult:
+    answer: AdvisorAnswer
+    snapshot: dict[str, Any]
+
+
+def _format_empty_answer(snapshot: dict[str, Any]) -> AdvisorAnswer:
     period = (snapshot.get('period') or {}).get('name') or 'этот месяц'
-    return (
-        f'За {period} пока мало данных для совета.\n'
-        'Добавьте операции или бюджеты — и спросите снова '
-        '(например: «сколько потратил в этом месяце?»).'
+    return AdvisorAnswer(
+        answer_kind='fact',
+        title=str(period),
+        lead=(
+            f'За {period} пока мало данных для совета. '
+            'Добавьте операции или бюджеты — и спросите снова.'
+        ),
+    )
+
+
+def _fallback_answer() -> AdvisorAnswer:
+    return AdvisorAnswer(
+        answer_kind='fact',
+        title='Финансист',
+        lead='Не удалось сформулировать ответ. Попробуйте спросить иначе.',
     )
 
 
@@ -53,6 +96,8 @@ def _snapshot_has_signal(snapshot: dict[str, Any]) -> bool:
         return True
     if snapshot.get('suggestions'):
         return True
+    if snapshot.get('debts') or snapshot.get('recurring'):
+        return True
     health = snapshot.get('budget_health') or {}
     if health.get('budget_count') or health.get('overspent') or health.get('at_risk'):
         return True
@@ -76,16 +121,80 @@ def _snapshot_has_signal(snapshot: dict[str, Any]) -> bool:
     return False
 
 
+def _clip(text: str, limit: int) -> str:
+    clean = ' '.join((text or '').split())
+    if len(clean) <= limit:
+        return clean
+    return clean[: limit - 1].rstrip() + '…'
+
+
+def parse_advisor_payload(raw: str) -> AdvisorAnswer:
+    """Разбирает JSON модели. ValueError — повод повторить запрос, не показывать сырьё."""
+    text = (raw or '').strip()
+    if text.startswith('```'):
+        text = re.sub(r'^```(?:json)?\s*', '', text)
+        text = re.sub(r'\s*```$', '', text)
+    data = json.loads(text)
+    if not isinstance(data, dict):
+        raise ValueError('Ответ модели не объект.')
+    kind = str(data.get('answer_kind') or '').strip()
+    if kind not in ALLOWED_KINDS:
+        raise ValueError('Неизвестный answer_kind.')
+    lead = _clip(str(data.get('lead') or ''), 700)
+    clarify = data.get('clarify')
+    clarify_text = _clip(str(clarify), 300) if clarify else ''
+    if kind == 'clarify':
+        lead = clarify_text or lead
+    if not lead:
+        raise ValueError('Пустой вывод.')
+    actions = []
+    for item in data.get('actions') or []:
+        step = _clip(str(item), MAX_ACTION_CHARS)
+        if step:
+            actions.append(step)
+    tables = []
+    for item in data.get('tables') or []:
+        name = str(item).strip()
+        if name in ALLOWED_TABLES and name not in tables:
+            tables.append(name)
+    if kind == 'fact':
+        actions = []
+        tables = tables[:1]
+    elif kind == 'clarify':
+        actions = []
+        tables = []
+    elif kind == 'decline':
+        actions = actions[:2]
+        tables = tables[:1]
+    else:
+        actions = actions[:2]
+        tables = tables[:3]
+    return AdvisorAnswer(
+        answer_kind=kind,
+        title=_clip(str(data.get('title') or 'Финансист'), 80) or 'Финансист',
+        lead=lead,
+        body=_clip(str(data.get('body') or ''), 500),
+        actions=actions,
+        tables=tables,
+        clarify=clarify_text or None,
+    )
+
+
 def _build_system_prompt(snapshot: dict[str, Any]) -> str:
     template = PROMPT_PATH.read_text(encoding='utf-8')
     snapshot_json = json.dumps(snapshot, ensure_ascii=False, indent=2)
     return template.replace('{{snapshot}}', snapshot_json)
 
 
-def answer_from_snapshot(question: str, snapshot: dict[str, Any]) -> str:
+def _json_mode_rejected(exc: Exception) -> bool:
+    message = str(exc).lower()
+    return 'response_format' in message or 'json_object' in message
+
+
+def answer_from_snapshot(question: str, snapshot: dict[str, Any]) -> AdvisorAnswer:
     """Sync LLM call. Raises ValueError on config/API failure."""
     if not _snapshot_has_signal(snapshot):
-        return _format_empty_snapshot_reply(snapshot)
+        return _format_empty_answer(snapshot)
 
     if not openai_api_key():
         raise ValueError('OPENAI_API_KEY не задан.')
@@ -94,19 +203,24 @@ def answer_from_snapshot(question: str, snapshot: dict[str, Any]) -> str:
     client = get_openai_client()
     model = voice_llm_model()
     last_error: Exception | None = None
+    use_json_mode = True
+    invalid_json_attempts = 0
 
     for attempt in range(1, MAX_RETRIES + 1):
         try:
+            kwargs: dict[str, Any] = {
+                'model': model,
+                'messages': [
+                    {'role': 'system', 'content': system_prompt},
+                    {'role': 'user', 'content': question.strip()},
+                ],
+                'temperature': 0.2,
+                'max_tokens': MAX_OUTPUT_TOKENS,
+            }
+            if use_json_mode:
+                kwargs['response_format'] = {'type': 'json_object'}
             with timed_ms() as timing:
-                response = client.chat.completions.create(
-                    model=model,
-                    messages=[
-                        {'role': 'system', 'content': system_prompt},
-                        {'role': 'user', 'content': question.strip()},
-                    ],
-                    temperature=0.2,
-                    max_tokens=500,
-                )
+                response = client.chat.completions.create(**kwargs)
             text = (response.choices[0].message.content or '').strip()
             log_voice_event(
                 'advisor_answer',
@@ -115,14 +229,23 @@ def answer_from_snapshot(question: str, snapshot: dict[str, Any]) -> str:
                 period=(snapshot.get('period') or {}).get('name'),
             )
             if not text:
-                return (
-                    'Не удалось сформулировать ответ. '
-                    'Попробуйте спросить иначе.'
-                )
-            if len(text) > MAX_ANSWER_CHARS:
-                text = text[: MAX_ANSWER_CHARS - 1].rstrip() + '…'
-            return text
+                invalid_json_attempts += 1
+                if invalid_json_attempts > 1:
+                    return _fallback_answer()
+                continue
+            try:
+                return parse_advisor_payload(text)
+            except (ValueError, json.JSONDecodeError) as exc:
+                invalid_json_attempts += 1
+                logger.warning('Advisor JSON rejected: %s', exc)
+                if invalid_json_attempts > 1:
+                    return _fallback_answer()
+                continue
         except Exception as exc:
+            if use_json_mode and _json_mode_rejected(exc):
+                use_json_mode = False
+                logger.warning('Advisor JSON mode unsupported, retrying plain')
+                continue
             last_error = exc
             logger.warning(
                 'Advisor LLM attempt %s/%s failed: %s',
@@ -139,7 +262,7 @@ def answer_from_snapshot(question: str, snapshot: dict[str, Any]) -> str:
     )
 
 
-async def answer_advisor_query(user: User, question: str) -> str:
+async def answer_advisor_query(user: User, question: str) -> AdvisorResult:
     from asgiref.sync import sync_to_async
     from telegram_bot.voice.period_parser import parse_advisor_period
 
@@ -148,4 +271,5 @@ async def answer_advisor_query(user: User, question: str) -> str:
         period=period,
         question=question,
     )
-    return await sync_to_async(answer_from_snapshot)(question, snapshot)
+    answer = await sync_to_async(answer_from_snapshot)(question, snapshot)
+    return AdvisorResult(answer=answer, snapshot=snapshot)

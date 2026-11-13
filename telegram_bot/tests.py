@@ -1108,8 +1108,10 @@ class AdvisorSnapshotTests(TestCase):
             'goals': [],
             'suggestions': [],
         }
-        text = answer_from_snapshot('сколько потратил?', empty)
-        self.assertIn('мало данных', text.lower())
+        answer = answer_from_snapshot('сколько потратил?', empty)
+        self.assertIn('мало данных', answer.lead.lower())
+        self.assertEqual(answer.actions, [])
+        self.assertEqual(answer.tables, [])
 
     def test_suggestions_count_as_signal(self):
         from telegram_bot.services.voice_advisor_executor import (
@@ -1192,7 +1194,13 @@ class AdvisorSnapshotTests(TestCase):
         from telegram_bot.voice.period_parser import parse_advisor_period
 
         today = date(2026, 7, 9)
-        # May / June expenses in addition to July fixture (1500)
+        Transaction.objects.create(
+            user=self.user,
+            category=self.products,
+            amount=self.Decimal('-1500'),
+            date=date(2026, 7, 9),
+            description='july-fixture',
+        )
         for year, month, amount in (
             (2026, 5, '-1000'),
             (2026, 6, '-2000'),
@@ -1242,6 +1250,13 @@ class AdvisorSnapshotTests(TestCase):
         from telegram_bot.voice.period_parser import parse_advisor_period
 
         today = date(2026, 7, 9)
+        Transaction.objects.create(
+            user=self.user,
+            category=self.products,
+            amount=self.Decimal('-1500'),
+            date=date(2026, 7, 8),
+            description='july-deficit',
+        )
         salary = Category.objects.create(
             user=self.user,
             name='Зарплата',
@@ -1301,6 +1316,13 @@ class AdvisorSnapshotTests(TestCase):
         from telegram_bot.voice.period_parser import parse_advisor_period
 
         today = date(2026, 7, 9)
+        Transaction.objects.create(
+            user=self.user,
+            category=self.products,
+            amount=self.Decimal('-1500'),
+            date=date(2026, 7, 9),
+            description='july-products',
+        )
         for year, month, amount in (
             (2026, 5, '-800'),
             (2026, 6, '-1200'),
@@ -1341,11 +1363,28 @@ class AdvisorSnapshotTests(TestCase):
     def test_cashflow_and_budget_health(self):
         from asgiref.sync import async_to_sync
         from datetime import date
+        from transactions.models import Transaction
         from telegram_bot.services.advisor_snapshot_service import (
             AdvisorSnapshotService,
         )
 
         today = date(2026, 7, 15)
+        Transaction.objects.create(
+            user=self.user,
+            category=self.products,
+            amount=self.Decimal('-1500'),
+            date=today,
+            description='july-cashflow',
+        )
+        Budget.objects.create(
+            user=self.user,
+            category=self.products,
+            amount=self.Decimal('5000'),
+            period_type=Budget.MONTHLY,
+            start_date=date(2026, 7, 1),
+            end_date=date(2026, 7, 31),
+            is_active=True,
+        )
         snapshot = async_to_sync(AdvisorSnapshotService(self.user).build)(
             today=today,
         )
@@ -1378,6 +1417,22 @@ class AdvisorSnapshotTests(TestCase):
         today = date(2026, 7, 10)
         start = date(2026, 7, 1)
         end = date(2026, 7, calendar.monthrange(2026, 7)[1])
+        Budget.objects.create(
+            user=self.user,
+            category=self.products,
+            amount=self.Decimal('5000'),
+            period_type=Budget.MONTHLY,
+            start_date=start,
+            end_date=end,
+            is_active=True,
+        )
+        Transaction.objects.create(
+            user=self.user,
+            category=self.products,
+            amount=self.Decimal('-1500'),
+            date=today,
+            description='july-base',
+        )
         taxi = Category.objects.create(
             user=self.user,
             name='Такси',
@@ -1400,7 +1455,7 @@ class AdvisorSnapshotTests(TestCase):
             date=today,
             description='over',
         )
-        # Push products budget into at-risk (≥80%): already 1500 of 5000 → add 2600
+        # 1500 уже в июле, плюс 2600 доводят продукты до зоны риска (≥80%)
         Transaction.objects.create(
             user=self.user,
             category=self.products,

@@ -136,6 +136,8 @@ class AdvisorSnapshotService:
                 }
                 for rec in recommendations[:5]
             ],
+            'debts': await self._open_debts(),
+            'recurring': await self._upcoming_recurring(),
             'monthly_series': None,
             'trend': None,
             'category_focus': None,
@@ -678,3 +680,60 @@ class AdvisorSnapshotService:
             'title': title,
             'candidates': candidates,
         }
+
+    async def _open_debts(self) -> list[dict[str, Any]]:
+        from debts.models import Debt
+
+        def _load() -> list[dict[str, Any]]:
+            rows: list[dict[str, Any]] = []
+            debts = Debt.objects.filter(user=self.user, is_open=True)
+            for debt in debts:
+                remaining = debt.remaining
+                if remaining <= 0:
+                    continue
+                rows.append({
+                    'counterparty': debt.counterparty,
+                    'direction': debt.direction,
+                    'remaining': _money(remaining),
+                    'currency': debt.currency,
+                })
+            rows.sort(key=lambda row: row['remaining'], reverse=True)
+            return rows[:8]
+
+        return await sync_to_async(_load, thread_sensitive=True)()
+
+    async def _upcoming_recurring(self) -> list[dict[str, Any]]:
+        from recurring.models import RecurringTemplate
+
+        def _load() -> list[dict[str, Any]]:
+            templates = (
+                RecurringTemplate.objects.filter(user=self.user, is_active=True)
+                .select_related('category')
+                .order_by('next_due', 'name')[:8]
+            )
+            rows: list[dict[str, Any]] = []
+            for template in templates:
+                rows.append({
+                    'name': template.name,
+                    'category': template.category.name,
+                    'next_due': template.next_due.isoformat(),
+                    'periodicity': template.periodicity,
+                    'amount': (
+                        _money(template.amount)
+                        if template.amount is not None
+                        else None
+                    ),
+                    'amount_min': (
+                        _money(template.amount_min)
+                        if template.amount_min is not None
+                        else None
+                    ),
+                    'amount_max': (
+                        _money(template.amount_max)
+                        if template.amount_max is not None
+                        else None
+                    ),
+                })
+            return rows
+
+        return await sync_to_async(_load, thread_sensitive=True)()

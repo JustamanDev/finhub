@@ -733,11 +733,13 @@ class CommandExecutor:
         )
         user = await sync_to_async(lambda: telegram_user.user)()
         try:
+            from telegram_bot.services.advisor_article import render_advisor_article
             from telegram_bot.services.voice_advisor_executor import (
                 answer_advisor_query,
             )
+            from telegram_bot.services.weekly_digest import send_rich_article
 
-            answer = await answer_advisor_query(user, question)
+            result = await answer_advisor_query(user, question)
         except ValueError as exc:
             await status.edit_text(f'❌ {exc}')
             return
@@ -748,16 +750,12 @@ class CommandExecutor:
             )
             return
 
-        lines = [
-            f'🎤 Распознано: «{question}»',
-            '',
-            answer,
-        ]
+        html, legacy = render_advisor_article(result.answer, result.snapshot)
         keyboard = InlineKeyboardMarkup([
             [
                 InlineKeyboardButton(
-                    text='📊 Отчёты',
-                    callback_data='show_report',
+                    text='Ещё вопрос',
+                    callback_data='advisor_again',
                 ),
             ],
             [
@@ -767,17 +765,18 @@ class CommandExecutor:
                 ),
             ],
         ])
+        await send_rich_article(
+            context.bot,
+            update.effective_chat.id,
+            html=html,
+            legacy_html=legacy,
+            reply_markup=keyboard,
+            fallback_hint='Меню под ответом.',
+        )
         try:
-            await status.edit_text(
-                '\n'.join(lines),
-                reply_markup=keyboard,
-            )
+            await status.delete()
         except Exception:
-            await context.bot.send_message(
-                chat_id=update.effective_chat.id,
-                text='\n'.join(lines),
-                reply_markup=keyboard,
-            )
+            logger.info('Не удалось убрать сообщение «смотрю цифры»')
 
     async def prompt_voice_confirmation(
         self,

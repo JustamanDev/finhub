@@ -834,6 +834,49 @@ class TextHandler(BaseHandler):
                 if handled:
                     return
 
+            from telegram_bot.services.advisor_mode import (
+                ADVISOR_ENTRY_TEXT,
+                ADVISOR_EXPIRED_TEXT,
+                is_money_entry,
+                take_advisor_mode,
+            )
+            from telegram_bot.voice.intents import (
+                ParsedVoiceCommand,
+                VoiceIntentType,
+            )
+
+            advisor_state = take_advisor_mode(context)
+            if advisor_state == 'expired':
+                await context.bot.send_message(
+                    chat_id=update.effective_chat.id,
+                    text=ADVISOR_EXPIRED_TEXT,
+                )
+                return
+            if advisor_state == 'active':
+                await self.log_message(
+                    telegram_user,
+                    'incoming',
+                    message_text,
+                )
+                if is_money_entry(message_text):
+                    await context.bot.send_message(
+                        chat_id=update.effective_chat.id,
+                        text=ADVISOR_ENTRY_TEXT,
+                    )
+                    return
+                await self._command_executor.execute_ask_advisor(
+                    update,
+                    context,
+                    telegram_user,
+                    ParsedVoiceCommand(
+                        intent=VoiceIntentType.ASK_ADVISOR,
+                        success=True,
+                        confidence=1.0,
+                        raw_transcript=message_text.strip(),
+                    ),
+                )
+                return
+
             from telegram_bot.voice.period_parser import looks_like_advisor_question
 
             if looks_like_advisor_question(message_text):

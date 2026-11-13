@@ -22,7 +22,7 @@
 | Модели бота | `telegram_bot/models.py` + migration |
 | API endpoint | `{app}/views.py`, `serializers.py`, register in `api/urls.py` |
 | Env vars | `finhub/settings/base.py` or prod/dev + `docs/human/environment.md` |
-| Промпты LLM | `telegram_bot/prompts/*.txt` |
+| Промпты LLM | `telegram_bot/prompts/*.txt`. Это контракт со снимком и разбором ответа, не `BotText`: правка едет вместе с кодом |
 
 ## Naming
 
