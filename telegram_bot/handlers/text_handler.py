@@ -1435,12 +1435,15 @@ class TextHandler(BaseHandler):
                 # При редактировании получаем категорию из бюджета
                 try:
                     logger.info(f"🔍 Получаем бюджет с ID: {editing_budget_id}")
-                    budget = await sync_to_async(lambda: Budget.objects.get(
-                        id=editing_budget_id,
-                        user=user,
-                        is_active=True,
-                    ), thread_sensitive=True)()
-                    logger.info(f"✅ Бюджет найден: {budget}")
+                    budget = await sync_to_async(
+                        lambda: Budget.objects.select_related('category').get(
+                            id=editing_budget_id,
+                            user=user,
+                            is_active=True,
+                        ),
+                        thread_sensitive=True,
+                    )()
+                    logger.info("✅ Бюджет найден: id=%s", budget.id)
                     category = await sync_to_async(lambda: budget.category)()
                     category_name = await sync_to_async(lambda: category.name)()
                     logger.info(f"✅ Категория получена: {category_name}")
