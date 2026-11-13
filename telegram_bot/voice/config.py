@@ -37,7 +37,7 @@ def voice_llm_model() -> str:
 
 def advisor_llm_model() -> str:
     """Модель кнопки «Финансист». Короткие вопросы остаются на voice_llm_model."""
-    return config('ADVISOR_LLM_MODEL', default='gpt-6-luna').strip()
+    return config('ADVISOR_LLM_MODEL', default='gpt-5.2').strip()
 
 
 def advisor_reasoning_effort() -> str:

@@ -38,6 +38,7 @@ def get_openai_client() -> OpenAI:
 def format_openai_error(exc: Exception) -> str:
     """User-facing hint for common OpenAI API failures."""
     message = str(exc)
+    lowered = message.lower()
     if 'unsupported_country_region_territory' in message:
         return (
             'OpenAI недоступен из текущего региона VPS. '
@@ -45,6 +46,11 @@ def format_openai_error(exc: Exception) -> str:
             '(EU/US). TELEGRAM_PROXY_URL для OpenAI не подходит, если proxy '
             'тоже в заблокированном регионе.'
         )
+    if (
+        'does not have access to model' in lowered
+        or 'model_not_found' in lowered
+    ):
+        return 'У ключа OpenAI нет доступа к выбранной модели.'
     return message
 
 

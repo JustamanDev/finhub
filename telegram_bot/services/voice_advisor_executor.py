@@ -299,9 +299,11 @@ def answer_from_snapshot(
             if attempt < MAX_RETRIES:
                 time.sleep(attempt)
 
+    hint = format_openai_error(last_error) if last_error else ''
+    if hint and hint != str(last_error):
+        raise ValueError(f'Не удалось получить ответ консультанта. {hint}')
     raise ValueError(
-        f'Не удалось получить ответ консультанта: '
-        f'{format_openai_error(last_error)}',
+        'Не удалось получить ответ консультанта. Попробуйте позже.',
     )
 
 

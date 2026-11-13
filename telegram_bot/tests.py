@@ -447,6 +447,18 @@ class OpenAIProxyConfigTests(TestCase):
         self.assertIn('OPENAI_PROXY_URL', message)
         self.assertIn('регион', message.lower())
 
+    def test_format_openai_model_access_hides_project(self):
+        from telegram_bot.voice.openai_client import format_openai_error
+
+        exc = Exception(
+            "Error code: 403 - {'error': {'message': "
+            "'Project `proj_secret` does not have access to model "
+            "`gpt-6-luna`', 'code': 'model_not_found'}}",
+        )
+        message = format_openai_error(exc)
+        self.assertIn('нет доступа', message)
+        self.assertNotIn('proj_secret', message)
+
 
 class TelegramResilienceTestCase(TestCase):
     def test_is_message_not_modified_error(self):

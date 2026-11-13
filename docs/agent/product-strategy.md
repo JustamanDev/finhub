@@ -30,7 +30,7 @@
 
 Это **не только Whisper**:
 
-1. [voice/config.py](../../telegram_bot/voice/config.py): по умолчанию `TRANSCRIPTION_MODEL=whisper-1`, `VOICE_LLM_MODEL=gpt-4o-mini` для разбора команд и коротких вопросов, `ADVISOR_LLM_MODEL=gpt-6-luna` с `ADVISOR_REASONING_EFFORT=low` для кнопки «Финансист». Настройки могут быть переопределены окружением.
+1. [voice/config.py](../../telegram_bot/voice/config.py): по умолчанию `TRANSCRIPTION_MODEL=whisper-1`, `VOICE_LLM_MODEL=gpt-4o-mini` для разбора команд и коротких вопросов, `ADVISOR_LLM_MODEL=gpt-5.2` с `ADVISOR_REASONING_EFFORT=low` для кнопки «Финансист». Настройки могут быть переопределены окружением.
 2. [voice_handler.py](../../telegram_bot/handlers/voice_handler.py): при `VOICE_ENABLED` аудио проходит транскрибацию, затем разбор команды.
 3. [interpreter.py](../../telegram_bot/voice/interpreter.py): сначала обычный парсер/regex, при неудаче — `chat.completions.create` для интерпретации. Не каждая запись вызывает LLM.
 4. [text_handler.py](../../telegram_bot/handlers/text_handler.py): узнаваемые вопросы направляются в `ASK_ADVISOR`, в том числе текстом; этот путь не закрыт голосовым флагом.
