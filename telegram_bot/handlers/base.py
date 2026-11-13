@@ -135,6 +135,7 @@ class BaseHandler:
             'voice_dialog',
             'advisor_armed_until',
             'advisor_pending_question',
+            'advisor_clarify_options',
         ):
             context.user_data.pop(key, None)
 

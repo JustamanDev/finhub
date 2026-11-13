@@ -31,6 +31,8 @@ ADVICE_OUTPUT_TOKENS = 2500
 FACT_PROFILE = 'fact'
 ADVICE_PROFILE = 'advice'
 MAX_ACTION_CHARS = 180
+MAX_CLARIFY_OPTIONS = 5
+MAX_OPTION_CHARS = 40
 ALLOWED_KINDS = frozenset({'fact', 'advice', 'clarify', 'decline'})
 ALLOWED_TABLES = frozenset({
     'movement',
@@ -54,6 +56,7 @@ class AdvisorAnswer:
     actions: list[str] = field(default_factory=list)
     tables: list[str] = field(default_factory=list)
     clarify: str | None = None
+    options: list[str] = field(default_factory=list)
 
 
 @dataclass
@@ -177,6 +180,7 @@ def parse_advisor_payload(raw: str) -> AdvisorAnswer:
     else:
         actions = actions[:2]
         tables = tables[:3]
+    options = _clarify_options(data.get('options')) if kind == 'clarify' else []
     return AdvisorAnswer(
         answer_kind=kind,
         title=_clip(str(data.get('title') or 'Финансист'), 80) or 'Финансист',
@@ -185,7 +189,22 @@ def parse_advisor_payload(raw: str) -> AdvisorAnswer:
         actions=actions,
         tables=tables,
         clarify=clarify_text or None,
+        options=options,
     )
+
+
+def _clarify_options(raw: Any) -> list[str]:
+    if not isinstance(raw, list):
+        return []
+    options: list[str] = []
+    for item in raw:
+        label = _clip(str(item), MAX_OPTION_CHARS)
+        if not label or label.casefold() == 'другое' or label in options:
+            continue
+        options.append(label)
+        if len(options) >= MAX_CLARIFY_OPTIONS:
+            break
+    return options
 
 
 def _build_system_prompt(snapshot: dict[str, Any]) -> str:
