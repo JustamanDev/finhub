@@ -38,7 +38,7 @@ class AdvisorModelSplitTests(TestCase):
         with (
             patch(
                 'telegram_bot.services.voice_advisor_executor.advisor_llm_model',
-                return_value='gpt-6-luna',
+                return_value='gpt-5.2',
             ),
             patch(
                 'telegram_bot.services.voice_advisor_executor.advisor_reasoning_effort',
@@ -51,7 +51,7 @@ class AdvisorModelSplitTests(TestCase):
         ):
             model, effort = resolve_advisor_call('advice')
             advice = completion_kwargs(model=model, effort=effort, use_json=True)
-            self.assertEqual(model, 'gpt-6-luna')
+            self.assertEqual(model, 'gpt-5.2')
             self.assertEqual(advice['reasoning_effort'], 'low')
             self.assertNotIn('temperature', advice)
 
