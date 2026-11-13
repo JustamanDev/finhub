@@ -837,6 +837,8 @@ class TextHandler(BaseHandler):
             from telegram_bot.services.advisor_mode import (
                 ADVISOR_ENTRY_TEXT,
                 ADVISOR_EXPIRED_TEXT,
+                drop_advisor_question,
+                followup_question,
                 is_money_entry,
                 take_advisor_mode,
             )
@@ -859,6 +861,7 @@ class TextHandler(BaseHandler):
                     message_text,
                 )
                 if is_money_entry(message_text):
+                    drop_advisor_question(context)
                     await context.bot.send_message(
                         chat_id=update.effective_chat.id,
                         text=ADVISOR_ENTRY_TEXT,
@@ -872,7 +875,10 @@ class TextHandler(BaseHandler):
                         intent=VoiceIntentType.ASK_ADVISOR,
                         success=True,
                         confidence=1.0,
-                        raw_transcript=message_text.strip(),
+                        raw_transcript=followup_question(
+                            context,
+                            message_text.strip(),
+                        ),
                     ),
                     profile='advice',
                 )
