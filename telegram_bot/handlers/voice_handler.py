@@ -209,6 +209,7 @@ class VoiceHandler(BaseHandler):
                         confidence=1.0,
                         raw_transcript=clean_transcript,
                     ),
+                    profile='advice',
                 )
                 return
 

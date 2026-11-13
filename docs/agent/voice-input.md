@@ -44,7 +44,7 @@ Voice → Whisper → transcript → [regex fast path | LLM JSON] → CommandExe
 
 ## Env
 
-`VOICE_ENABLED`, `OPENAI_API_KEY`, `OPENAI_PROXY_URL`, `TRANSCRIPTION_MODEL`, `VOICE_LLM_MODEL`, `WHISPER_PROMPT`, `WHISPER_LANGUAGE`
+`VOICE_ENABLED`, `OPENAI_API_KEY`, `OPENAI_PROXY_URL`, `TRANSCRIPTION_MODEL`, `VOICE_LLM_MODEL`, `ADVISOR_LLM_MODEL`, `ADVISOR_REASONING_EFFORT`, `WHISPER_PROMPT`, `WHISPER_LANGUAGE`
 
 `OPENAI_PROXY_URL` — если не задан, используется `TELEGRAM_PROXY_URL`. Для Whisper/LLM нужен proxy с **выходом в стране, где OpenAI доступен** (EU/US); московский SOCKS для Telegram может не подойти.
 

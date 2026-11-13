@@ -35,6 +35,17 @@ def voice_llm_model() -> str:
     return config('VOICE_LLM_MODEL', default='gpt-4o-mini').strip()
 
 
+def advisor_llm_model() -> str:
+    """Модель кнопки «Финансист». Короткие вопросы остаются на voice_llm_model."""
+    return config('ADVISOR_LLM_MODEL', default='gpt-6-luna').strip()
+
+
+def advisor_reasoning_effort() -> str:
+    allowed = {'none', 'low', 'medium', 'high', 'xhigh', 'max'}
+    raw = config('ADVISOR_REASONING_EFFORT', default='low').strip().lower()
+    return raw if raw in allowed else 'low'
+
+
 def whisper_prompt() -> str:
     return config('WHISPER_PROMPT', default='').strip()
 

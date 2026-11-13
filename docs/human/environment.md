@@ -64,7 +64,9 @@
 | `OPENAI_API_KEY` | — | Whisper + LLM (обязательно при `VOICE_ENABLED=True`) |
 | `OPENAI_PROXY_URL` | `TELEGRAM_PROXY_URL` | HTTP/SOCKS proxy для OpenAI (`socks5h://…`); нужен выход в поддерживаемой стране |
 | `TRANSCRIPTION_MODEL` | `whisper-1` | Модель Whisper |
-| `VOICE_LLM_MODEL` | `gpt-4o-mini` | Модель для разбора естественной речи |
+| `VOICE_LLM_MODEL` | `gpt-4o-mini` | Разбор речи и короткий вопрос без кнопки |
+| `ADVISOR_LLM_MODEL` | `gpt-6-luna` | Кнопка «Финансист» |
+| `ADVISOR_REASONING_EFFORT` | `low` | Глубина рассуждения кнопки: `none`, `low`, `medium`, `high` |
 | `WHISPER_PROMPT` | — | Подсказка Whisper (фин. термины RU/EN) |
 | `WHISPER_LANGUAGE` | — | ISO-код языка (`ru`), пусто = auto |
 
