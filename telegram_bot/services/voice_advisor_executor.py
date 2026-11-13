@@ -13,7 +13,12 @@ from typing import Any
 from django.contrib.auth.models import User
 
 from telegram_bot.services.advisor_snapshot_service import AdvisorSnapshotService
-from telegram_bot.voice.config import openai_api_key, voice_llm_model
+from telegram_bot.voice.config import (
+    advisor_llm_model,
+    advisor_reasoning_effort,
+    openai_api_key,
+    voice_llm_model,
+)
 from telegram_bot.voice.metrics import log_voice_event, timed_ms
 from telegram_bot.voice.openai_client import format_openai_error, get_openai_client
 
@@ -22,6 +27,9 @@ logger = logging.getLogger(__name__)
 PROMPT_PATH = Path(__file__).resolve().parent.parent / 'prompts' / 'advisor_analyst.txt'
 MAX_RETRIES = 3
 MAX_OUTPUT_TOKENS = 900
+ADVICE_OUTPUT_TOKENS = 2500
+FACT_PROFILE = 'fact'
+ADVICE_PROFILE = 'advice'
 MAX_ACTION_CHARS = 180
 ALLOWED_KINDS = frozenset({'fact', 'advice', 'clarify', 'decline'})
 ALLOWED_TABLES = frozenset({
@@ -191,7 +199,37 @@ def _json_mode_rejected(exc: Exception) -> bool:
     return 'response_format' in message or 'json_object' in message
 
 
-def answer_from_snapshot(question: str, snapshot: dict[str, Any]) -> AdvisorAnswer:
+def resolve_advisor_call(profile: str) -> tuple[str, str]:
+    """Короткий вопрос — быстрая модель. Кнопка «Финансист» — модель с рассуждением."""
+    if profile == ADVICE_PROFILE:
+        return advisor_llm_model(), advisor_reasoning_effort()
+    return voice_llm_model(), 'none'
+
+
+def completion_kwargs(
+    *,
+    model: str,
+    effort: str,
+    use_json: bool,
+) -> dict[str, Any]:
+    kwargs: dict[str, Any] = {'model': model}
+    if effort and effort != 'none':
+        kwargs['reasoning_effort'] = effort
+        kwargs['max_completion_tokens'] = ADVICE_OUTPUT_TOKENS
+    else:
+        kwargs['temperature'] = 0.2
+        kwargs['max_tokens'] = MAX_OUTPUT_TOKENS
+    if use_json:
+        kwargs['response_format'] = {'type': 'json_object'}
+    return kwargs
+
+
+def answer_from_snapshot(
+    question: str,
+    snapshot: dict[str, Any],
+    *,
+    profile: str = FACT_PROFILE,
+) -> AdvisorAnswer:
     """Sync LLM call. Raises ValueError on config/API failure."""
     if not _snapshot_has_signal(snapshot):
         return _format_empty_answer(snapshot)
@@ -201,24 +239,22 @@ def answer_from_snapshot(question: str, snapshot: dict[str, Any]) -> AdvisorAnsw
 
     system_prompt = _build_system_prompt(snapshot)
     client = get_openai_client()
-    model = voice_llm_model()
+    model, effort = resolve_advisor_call(profile)
     last_error: Exception | None = None
     use_json_mode = True
     invalid_json_attempts = 0
 
     for attempt in range(1, MAX_RETRIES + 1):
         try:
-            kwargs: dict[str, Any] = {
-                'model': model,
-                'messages': [
-                    {'role': 'system', 'content': system_prompt},
-                    {'role': 'user', 'content': question.strip()},
-                ],
-                'temperature': 0.2,
-                'max_tokens': MAX_OUTPUT_TOKENS,
-            }
-            if use_json_mode:
-                kwargs['response_format'] = {'type': 'json_object'}
+            kwargs = completion_kwargs(
+                model=model,
+                effort=effort,
+                use_json=use_json_mode,
+            )
+            kwargs['messages'] = [
+                {'role': 'system', 'content': system_prompt},
+                {'role': 'user', 'content': question.strip()},
+            ]
             with timed_ms() as timing:
                 response = client.chat.completions.create(**kwargs)
             text = (response.choices[0].message.content or '').strip()
@@ -226,6 +262,8 @@ def answer_from_snapshot(question: str, snapshot: dict[str, Any]) -> AdvisorAnsw
                 'advisor_answer',
                 llm_ms=timing.get('ms'),
                 chars=len(text),
+                model=model,
+                profile=profile,
                 period=(snapshot.get('period') or {}).get('name'),
             )
             if not text:
@@ -242,9 +280,14 @@ def answer_from_snapshot(question: str, snapshot: dict[str, Any]) -> AdvisorAnsw
                     return _fallback_answer()
                 continue
         except Exception as exc:
+            message = str(exc).lower()
             if use_json_mode and _json_mode_rejected(exc):
                 use_json_mode = False
                 logger.warning('Advisor JSON mode unsupported, retrying plain')
+                continue
+            if effort != 'none' and 'reasoning' in message:
+                effort = 'none'
+                logger.warning('Advisor reasoning unsupported, retrying without it')
                 continue
             last_error = exc
             logger.warning(
@@ -262,7 +305,12 @@ def answer_from_snapshot(question: str, snapshot: dict[str, Any]) -> AdvisorAnsw
     )
 
 
-async def answer_advisor_query(user: User, question: str) -> AdvisorResult:
+async def answer_advisor_query(
+    user: User,
+    question: str,
+    *,
+    profile: str = FACT_PROFILE,
+) -> AdvisorResult:
     from asgiref.sync import sync_to_async
     from telegram_bot.voice.period_parser import parse_advisor_period
 
@@ -271,5 +319,9 @@ async def answer_advisor_query(user: User, question: str) -> AdvisorResult:
         period=period,
         question=question,
     )
-    answer = await sync_to_async(answer_from_snapshot)(question, snapshot)
+    answer = await sync_to_async(answer_from_snapshot)(
+        question,
+        snapshot,
+        profile=profile,
+    )
     return AdvisorResult(answer=answer, snapshot=snapshot)

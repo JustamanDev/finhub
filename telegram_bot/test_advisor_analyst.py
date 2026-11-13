@@ -26,7 +26,44 @@ from telegram_bot.services.voice_advisor_executor import (
 )
 
 
-class AdvisorModeTests(TestCase):
+class AdvisorModelSplitTests(TestCase):
+    def test_button_uses_reasoning_model_and_facts_stay_fast(self):
+        from unittest.mock import patch
+
+        from telegram_bot.services.voice_advisor_executor import (
+            completion_kwargs,
+            resolve_advisor_call,
+        )
+
+        with (
+            patch(
+                'telegram_bot.services.voice_advisor_executor.advisor_llm_model',
+                return_value='gpt-6-luna',
+            ),
+            patch(
+                'telegram_bot.services.voice_advisor_executor.advisor_reasoning_effort',
+                return_value='low',
+            ),
+            patch(
+                'telegram_bot.services.voice_advisor_executor.voice_llm_model',
+                return_value='gpt-4o-mini',
+            ),
+        ):
+            model, effort = resolve_advisor_call('advice')
+            advice = completion_kwargs(model=model, effort=effort, use_json=True)
+            self.assertEqual(model, 'gpt-6-luna')
+            self.assertEqual(advice['reasoning_effort'], 'low')
+            self.assertNotIn('temperature', advice)
+
+            fact_model, fact_effort = resolve_advisor_call('fact')
+            fact = completion_kwargs(
+                model=fact_model,
+                effort=fact_effort,
+                use_json=True,
+            )
+            self.assertEqual(fact_model, 'gpt-4o-mini')
+            self.assertNotIn('reasoning_effort', fact)
+            self.assertEqual(fact['temperature'], 0.2)
     def test_menu_has_financier_button(self):
         markup = ActionKeyboard.get_main_menu_keyboard()
         buttons = [

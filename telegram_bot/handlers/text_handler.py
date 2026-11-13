@@ -874,6 +874,7 @@ class TextHandler(BaseHandler):
                         confidence=1.0,
                         raw_transcript=message_text.strip(),
                     ),
+                    profile='advice',
                 )
                 return
 

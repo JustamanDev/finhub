@@ -717,6 +717,8 @@ class CommandExecutor:
         context: ContextTypes.DEFAULT_TYPE,
         telegram_user,
         command: ParsedVoiceCommand,
+        *,
+        profile: str = 'fact',
     ) -> None:
         question = (command.raw_transcript or '').strip()
         if not question:
@@ -739,7 +741,7 @@ class CommandExecutor:
             )
             from telegram_bot.services.weekly_digest import send_rich_article
 
-            result = await answer_advisor_query(user, question)
+            result = await answer_advisor_query(user, question, profile=profile)
         except ValueError as exc:
             await status.edit_text(f'❌ {exc}')
             return
